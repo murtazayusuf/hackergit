@@ -380,6 +380,7 @@ def stats(con):
         "last": q("SELECT max(time) FROM stories"),
         "last_update": int(meta_get(con, "last_update", 0) or 0),
         "github_status": meta_get(con, "github_status", "not run yet"),
+        "version": meta_get(con, "last_rebuild", "0"),
     }
 
 

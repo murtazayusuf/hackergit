@@ -59,10 +59,6 @@
 
   .controls { display: flex; flex-direction: column; gap: 10px; padding: 14px 0; border-bottom: 1px solid var(--line); }
   .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-  .tabs { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-  .tabs button { padding: 5px 14px; color: var(--muted); }
-  .tabs button + button { border-left: 1px solid var(--line); }
-  .tabs button.on { background: var(--accent); color: #fff; font-weight: 600; }
   .chip { padding: 4px 12px; border-radius: 999px; background: var(--bg2); border: 1px solid var(--line); color: var(--text); white-space: nowrap; }
   .chip:hover { background: var(--bg3); }
   .chip.on { background: var(--chip-on); color: var(--chip-on-text); border-color: var(--chip-on); }
@@ -97,6 +93,8 @@
 
   .loadmore { display: block; margin: 20px auto; padding: 8px 18px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg2); }
   .loadmore:hover { background: var(--bg3); }
+  #bar { position: fixed; top: 0; left: 0; height: 2px; width: 0; background: var(--accent); z-index: 30; opacity: 0; transition: opacity .2s; }
+  body.busy .list { opacity: .55; transition: opacity .15s .1s; }
   .empty, .loading { color: var(--muted); padding: 48px 0; text-align: center; }
 
   .page h1 { font-size: 24px; margin: 18px 0 6px; word-break: break-word; }
@@ -146,6 +144,7 @@
   </div>
 </header>
 
+<div id="bar"></div>
 <main id="view"></main>
 
 <footer>
@@ -166,11 +165,48 @@ const hn = (id) => `https://news.ycombinator.com/item?id=${id}`;
 const store = { get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
                 set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
 
-async function api(path) {
-  const r = await fetch(path);
-  if (r.status === 404) return null;
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  return r.json();
+// Browser cache: responses live in memory for this visit and in localStorage across visits.
+// Saved responses are only reused while the site's data version (from /api/stats) is unchanged.
+const MEMO = new Map();
+const SAVED_KEY = "hg-cache-v1";
+let saved = (() => { try { return JSON.parse(localStorage.getItem(SAVED_KEY)) || { ver: null, items: {} }; } catch { return { ver: null, items: {} }; } })();
+let saveTimer = 0;
+function persist(path, data) {
+  if (!STATS || path.startsWith("/api/stats")) return;
+  if (saved.ver !== STATS.version) saved = { ver: STATS.version, items: {} };
+  saved.items[path] = data;
+  const keys = Object.keys(saved.items);
+  if (keys.length > 120) delete saved.items[keys[0]];
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try { localStorage.setItem(SAVED_KEY, JSON.stringify(saved)); }
+    catch { saved.items = {}; try { localStorage.removeItem(SAVED_KEY); } catch {} }
+  }, 300);
+}
+function api(path) {
+  if (!MEMO.has(path) && STATS && saved.ver === STATS.version && saved.items[path] !== undefined) {
+    MEMO.set(path, Promise.resolve(saved.items[path]));
+  }
+  if (!MEMO.has(path)) {
+    const p = fetch(path, path.startsWith("/api/stats") ? { cache: "no-cache" } : undefined).then(r => {
+      if (r.status === 404) return null;
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    }).then(d => { persist(path, d); return d; });
+    p.catch(() => MEMO.delete(path));
+    MEMO.set(path, p);
+    if (MEMO.size > 300) MEMO.delete(MEMO.keys().next().value);
+  }
+  return MEMO.get(path);
+}
+const prefetch = (path) => { api(path).catch(() => {}); };
+let busyTimer = 0;
+function busy(on) {
+  const b = $("#bar");
+  clearTimeout(busyTimer);
+  if (on) { b.style.transition = "none"; b.style.width = "0"; b.style.opacity = "1"; b.offsetWidth; b.style.transition = "width 4s cubic-bezier(.1,.7,.2,1)"; b.style.width = "85%"; }
+  else { b.style.transition = "width .15s"; b.style.width = "100%"; busyTimer = setTimeout(() => { b.style.opacity = "0"; }, 200); }
+  document.body.classList.toggle("busy", on);
 }
 
 const LANG_COLORS = { Python: "#3572A5", JavaScript: "#f1e05a", TypeScript: "#3178c6", Go: "#00ADD8", Rust: "#dea584",
@@ -223,8 +259,20 @@ function select(name, opts, value, label) {
   return `<label>${label}<select data-f="${name}">${opts.map(([v, t]) => `<option value="${v}"${v === value ? " selected" : ""}>${t}</option>`).join("")}</select></label>`;
 }
 
-function renderList() {
+let navToken = 0;
+const searchUrl = (s, page) => `/api/search?${stateQuery(s, { page })}`;
+
+async function renderList() {
   const s = readState();
+  s.view = "repos";
+  const token = ++navToken;
+  let first;
+  busy(true);
+  try { first = await api(searchUrl(s, 0)); }
+  catch (e) { busy(false); view.innerHTML = `<div class="empty">Something went wrong loading results. Try again.</div>`; return; }
+  if (token !== navToken) return;
+  busy(false);
+
   document.title = s.q ? `${s.q} - HackerGit` : "HackerGit: GitHub repos on Hacker News";
   $("#q").value = s.q;
   const years = [], now = new Date().getUTCFullYear();
@@ -234,16 +282,13 @@ function renderList() {
   const hasStars = STATS && STATS.with_stars > 0;
   const langs = (STATS && STATS.langs) || [];
   const dirty = Object.keys(DEFAULTS).some(k => k !== "view" && k !== "q" && s[k] !== DEFAULTS[k]);
+  const st = STATS;
 
   view.innerHTML = `
     ${!s.q && !dirty ? `<section class="hero"><h1>Every GitHub repo Hacker News has shared.</h1>
-      <p id="hero-sub">Search them and sort by points, comments, or the karma of whoever posted it.</p></section>` : ""}
+      <p>${st ? `${fmt(st.repos)} repos from ${fmt(st.stories)} Hacker News posts since ${new Date(st.first * 1000).getUTCFullYear()}. ` : ""}Search them and sort by points, comments, stars, or the karma of whoever posted it.</p></section>` : ""}
     <section class="controls">
       <div class="row">
-        <div class="tabs" role="tablist">
-          <button data-view="repos" class="${s.view === "repos" ? "on" : ""}" role="tab">Repos</button>
-          <button data-view="posts" class="${s.view === "posts" ? "on" : ""}" role="tab">HN posts</button>
-        </div>
         ${SORTS.filter(([k]) => k !== "stars" || hasStars).map(([k, t]) => `<button class="chip${s.sort === k ? " on" : ""}" data-sort="${k}">${t}</button>`).join("")}
       </div>
       <div class="row filters">
@@ -257,44 +302,41 @@ function renderList() {
         ${dirty ? `<button class="reset" id="reset">Clear filters</button>` : ""}
       </div>
     </section>
-    <div class="summary"><span id="count"></span><span id="fresh"></span></div>
+    <div class="summary"><span id="count"></span><span>${st && st.last_update ? `Updated ${ago(st.last_update)}` : ""}</span></div>
     <ol class="list" id="list"></ol>
     <div id="tail"></div>`;
 
-  view.querySelectorAll("[data-view]").forEach(b => b.onclick = () => go("/?" + stateQuery({ ...s, view: b.dataset.view })));
-  view.querySelectorAll("[data-sort]").forEach(b => b.onclick = () => go("/?" + stateQuery({ ...s, sort: b.dataset.sort })));
+  view.querySelectorAll("[data-sort]").forEach(b => {
+    const url = "/?" + stateQuery({ ...s, sort: b.dataset.sort });
+    b.onclick = () => go(url);
+    b.onmouseenter = () => prefetch(searchUrl({ ...s, sort: b.dataset.sort }, 0));
+  });
   view.querySelectorAll("select[data-f]").forEach(el => el.onchange = () => {
     const n = { ...s };
     if (el.dataset.f === "karma") { const [a, b] = el.value.split("-"); n.min_karma = a && a !== "0" ? a : ""; n.max_karma = b || ""; }
     else n[el.dataset.f] = el.value;
     go("/?" + stateQuery(n));
   });
-  const r = $("#reset"); if (r) r.onclick = () => go("/?" + stateQuery({ ...DEFAULTS, q: s.q, view: s.view }));
-
-  statsP.then(st => {
-    if (!st) return;
-    const sub = $("#hero-sub");
-    if (sub) sub.textContent = `${fmt(st.repos)} repos from ${fmt(st.stories)} Hacker News posts since ${new Date(st.first * 1000).getUTCFullYear()}. Search them and sort by points, comments, or the karma of whoever posted it.`;
-    const f = $("#fresh"); if (f && st.last_update) f.textContent = `Updated ${ago(st.last_update)}`;
-  });
-  loadPage(s, 0);
+  const r = $("#reset"); if (r) r.onclick = () => go("/?" + stateQuery({ ...DEFAULTS, q: s.q }));
+  showPage(s, 0, first, token);
 }
 
-async function loadPage(s, page) {
+function showPage(s, page, d, token) {
   const list = $("#list"), tail = $("#tail");
-  tail.innerHTML = `<div class="loading">Loading…</div>`;
-  let d;
-  try { d = await api(`/api/search?${stateQuery(s, { page })}`); }
-  catch (e) { tail.innerHTML = `<div class="empty">Something went wrong loading results.</div>`; return; }
-  if (readState().q !== s.q || !document.body.contains(list)) return;
-  $("#count").textContent = `${fmt(d.total)} ${s.view === "posts" ? "posts" : "repos"}`;
+  if (!list || token !== navToken) return;
+  $("#count").textContent = `${fmt(d.total)} repos`;
   const start = page * d.page_size;
-  list.insertAdjacentHTML("beforeend", d.results.map((r, i) => s.view === "posts" ? postItem(r, start + i + 1) : repoItem(r, start + i + 1)).join(""));
-  if (!d.total) tail.innerHTML = `<div class="empty">No repos match. Try fewer filters.</div>`;
-  else if (start + d.results.length < d.total) {
-    tail.innerHTML = `<button class="loadmore">Load more</button>`;
-    tail.firstChild.onclick = () => loadPage(s, page + 1);
-  } else tail.innerHTML = "";
+  list.insertAdjacentHTML("beforeend", d.results.map((r, i) => repoItem(r, start + i + 1)).join(""));
+  if (!d.total) { tail.innerHTML = `<div class="empty">No repos match. Try fewer filters.</div>`; return; }
+  if (start + d.results.length >= d.total) { tail.innerHTML = ""; return; }
+  const next = searchUrl(s, page + 1);
+  prefetch(next);  // so "Load more" is instant
+  tail.innerHTML = `<button class="loadmore">Load more</button>`;
+  tail.firstChild.onclick = async () => {
+    tail.firstChild.disabled = true; tail.firstChild.textContent = "Loading…";
+    try { showPage(s, page + 1, await api(next), token); }
+    catch (e) { tail.innerHTML = `<div class="empty">Something went wrong. Try again.</div>`; }
+  };
 }
 
 function repoName(full, href) {
@@ -342,6 +384,10 @@ function subsList(posts) {
     <span class="m">${fmt(p.points)} pts · ${fmt(p.comments)} comments · by ${userLink(p.author, p.karma)} · ${date(p.time)}</span></div>`).join("")}</div>`;
 }
 
+view.addEventListener("mouseover", (e) => {
+  const a = e.target.closest("a.repo");
+  if (a) prefetch(`/api/repo?key=${encodeURIComponent(a.getAttribute("href").slice(3))}`);
+});
 view.addEventListener("click", async (e) => {
   const b = e.target.closest(".more-subs");
   if (!b) return;
@@ -353,8 +399,11 @@ view.addEventListener("click", async (e) => {
 
 // ---------------------------------------------------------------- repo + user pages
 async function renderRepo(key) {
-  view.innerHTML = `<div class="loading">Loading…</div>`;
-  const d = await api(`/api/repo?key=${encodeURIComponent(key)}`);
+  const token = ++navToken;
+  busy(true);
+  const d = await api(`/api/repo?key=${encodeURIComponent(key)}`).catch(() => null);
+  busy(false);
+  if (token !== navToken) return;
   if (!d) { view.innerHTML = `<div class="page"><h1 class="mono">${esc(key)}</h1><p>This repo hasn't been shared on Hacker News (yet). <a href="https://github.com/${esc(key)}" style="color:var(--link)">Open on GitHub ↗</a></p></div>`; return; }
   const r = d.repo;
   document.title = `${r.repo} on Hacker News - HackerGit`;

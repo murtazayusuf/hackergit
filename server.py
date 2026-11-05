@@ -16,8 +16,9 @@ import re
 import threading
 import time
 import traceback
+from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import hackergit as hg
 
@@ -26,9 +27,11 @@ INDEX = os.path.join(ROOT, "static", "index.html")
 PAGE_SIZE = 30
 
 _local = threading.local()
-_cache = {}
-_cache_stamp = [None]
+# Responses are cached until the next index rebuild (every UPDATE_MINUTES), not per database write.
+_cache = OrderedDict()
 _cache_lock = threading.Lock()
+_version = {"v": None, "checked": 0.0}
+CACHE_MAX = 5000
 
 
 def db():
@@ -180,6 +183,46 @@ def user_detail(name):
     return {**dict(u), "posts": s["n"], "points": s["pts"] or 0}
 
 
+def data_version(force=False):
+    now = time.time()
+    if force or now - _version["checked"] > 5:
+        _version["v"] = hg.meta_get(db(), "last_rebuild", "0")
+        _version["checked"] = now
+    return _version["v"]
+
+
+def cached_api(path, query):
+    """JSON body for an API call, from cache when the index hasn't changed since it was computed."""
+    p = parse_qs(query)
+    key = path + "?" + urlencode(sorted((k, v[0]) for k, v in p.items()))
+    v = data_version()
+    with _cache_lock:
+        hit = _cache.get(key)
+        if hit and hit[0] == v:
+            _cache.move_to_end(key)
+            return hit[1]
+    data = api(path, p)
+    if data is None:
+        return None
+    body = json.dumps(data, separators=(",", ":"))
+    with _cache_lock:
+        _cache[key] = (v, body)
+        while len(_cache) > CACHE_MAX:
+            _cache.popitem(last=False)
+    return body
+
+
+def warm_cache():
+    """Precompute the pages most people open, right after the index changes."""
+    data_version(force=True)
+    t = time.time()
+    queries = ["", "page=1"] + [f"sort={s}" for s in SORTS_REPOS] + [f"sort={s}&page=1" for s in SORTS_REPOS]
+    for q in queries:
+        cached_api("/api/search", q)
+    cached_api("/api/stats", "")
+    hg.log(f"cache: warmed {len(queries) + 1} pages in {time.time() - t:.1f}s")
+
+
 def api(path, p):
     if path == "/api/search":
         return search(p)
@@ -230,23 +273,11 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         try:
             if u.path.startswith("/api/"):
-                stamp = os.path.getmtime(hg.DB_PATH + "-wal") if os.path.exists(hg.DB_PATH + "-wal") else 0
-                key = u.path + "?" + u.query
-                with _cache_lock:
-                    if _cache_stamp[0] != stamp:
-                        _cache.clear()
-                        _cache_stamp[0] = stamp
-                    body = _cache.get(key)
+                body = cached_api(u.path, u.query)
                 if body is None:
-                    data = api(u.path, parse_qs(u.query))
-                    if data is None:
-                        return self.send(404, '{"error":"not found"}', "application/json")
-                    body = json.dumps(data, separators=(",", ":"))
-                    with _cache_lock:
-                        if len(_cache) > 2000:
-                            _cache.clear()
-                        _cache[key] = body
-                return self.send(200, body, "application/json", "public, max-age=60")
+                    return self.send(404, '{"error":"not found"}', "application/json")
+                return self.send(200, body, "application/json",
+                                 "no-cache" if u.path == "/api/stats" else "public, max-age=120")
             if u.path == "/robots.txt":
                 return self.send(200, "User-agent: *\nAllow: /\n", "text/plain")
             if u.path == "/healthz":
@@ -269,10 +300,12 @@ def updater(minutes):
                 hg.log("updater: no data yet, running backfill (takes ~10-20 min)")
                 hg.backfill(con)
                 hg.rebuild(con)  # show results now; karma fills in next
+                warm_cache()
                 hg.refresh_karma(con)
                 hg.rebuild(con)
             hg.update(con)
             con.close()
+            warm_cache()
         except Exception:
             traceback.print_exc()
         time.sleep(minutes * 60)
