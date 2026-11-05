@@ -12,6 +12,9 @@
 set -euo pipefail
 
 REPO=${REPO:-murtazayusuf/hackergit}
+# GitHub now sends "repo:<owner>@<owner id>/<repo>@<repo id>:..." in its sign-in token. Both the old
+# name-only format and the new ID format are accepted. IDs never change, even if a repo is renamed.
+REPO_WITH_IDS=${REPO_WITH_IDS:-murtazayusuf@65263321/hackergit@1447475921}
 EMAIL=${EMAIL:?Set EMAIL=you@example.com for budget alerts}
 ROLE=hackergit-deploy
 export AWS_PAGER=""
@@ -38,7 +41,10 @@ cat > /tmp/hackergit-trust.json <<EOF
     "Condition": {
       "StringEquals": {
         "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-        "token.actions.githubusercontent.com:sub": "repo:${REPO}:ref:refs/heads/main"
+        "token.actions.githubusercontent.com:sub": [
+          "repo:${REPO_WITH_IDS}:ref:refs/heads/main",
+          "repo:${REPO}:ref:refs/heads/main"
+        ]
       }
     }
   }]
