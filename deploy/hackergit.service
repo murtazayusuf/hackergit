@@ -1,0 +1,22 @@
+[Unit]
+Description=HackerGit
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=hackergit
+Group=hackergit
+WorkingDirectory=/opt/hackergit
+Environment=HOST=127.0.0.1 PORT=8080 HACKERGIT_DB=/var/lib/hackergit/hackergit.db UPDATE_MINUTES=10 PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/hackergit.env
+ExecStart=/usr/bin/python3 /opt/hackergit/server.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/hackergit
+
+[Install]
+WantedBy=multi-user.target

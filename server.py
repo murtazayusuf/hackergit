@@ -3,6 +3,7 @@
   python server.py                 # serves on $PORT (default 8000)
 
 Env vars:
+  HOST             address to listen on (default 0.0.0.0)
   PORT             port to listen on (default 8000)
   HACKERGIT_DB     path to the SQLite file (default ./data/hackergit.db)
   UPDATE_MINUTES   how often to pull new stories from HN (default 10, 0 disables)
@@ -267,6 +268,7 @@ def updater(minutes):
             if not hg.meta_get(con, "backfill_done"):
                 hg.log("updater: no data yet, running backfill (takes ~10-20 min)")
                 hg.backfill(con)
+                hg.rebuild(con)  # show results now; karma fills in next
                 hg.refresh_karma(con)
                 hg.rebuild(con)
             hg.update(con)
@@ -282,9 +284,10 @@ def main():
     hg.connect().close()  # make sure the schema exists before readers open it
     if minutes > 0:
         threading.Thread(target=updater, args=(minutes,), daemon=True).start()
-    srv = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+    host = os.environ.get("HOST", "0.0.0.0")
+    srv = ThreadingHTTPServer((host, port), Handler)
     srv.daemon_threads = True
-    hg.log(f"HackerGit on http://0.0.0.0:{port}  db={hg.DB_PATH}")
+    hg.log(f"HackerGit on http://{host}:{port}  db={hg.DB_PATH}")
     srv.serve_forever()
 
 

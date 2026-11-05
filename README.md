@@ -43,9 +43,34 @@ Other commands: `python3 hackergit.py update | karma | github | rebuild | stats`
 
 ## Deploy to hackergit.org
 
-The app needs a small always-on server with a persistent disk (for the SQLite file). Two easy options:
+The app needs a small always-on server with a persistent disk (for the SQLite file).
 
-### Option A: Fly.io (about $2-5/month)
+### Option A (set up): AWS Lightsail via GitHub Actions (about $7/month)
+
+Every push to `main` runs `.github/workflows/deploy.yml`, which creates a Lightsail server on the first run
+(Ubuntu, 1 GB plan, static IP, ports 22/80/443) and then installs or updates the app with `deploy/setup.sh`
+(Python + [Caddy](https://caddyserver.com) for automatic HTTPS, run by systemd). No AWS keys are stored in GitHub:
+the workflow signs in with GitHub's OIDC and uses a short-lived SSH certificate from Lightsail.
+
+One-time setup:
+
+1. In the AWS console of the hosting account, open **CloudShell** (the `>_` icon), upload
+   `deploy/aws-bootstrap.sh` (Actions → Upload file) and run:
+   ```bash
+   EMAIL=you@example.com bash aws-bootstrap.sh
+   ```
+   It creates the GitHub sign-in provider, a `hackergit-deploy` role limited to Lightsail and to this repo's
+   `main` branch, and a $10/month budget alert. It prints the role ARN.
+2. In GitHub: **Settings → Secrets and variables → Actions → New repository secret**:
+   `AWS_ROLE_ARN` = the ARN from step 1.
+   Optional: `STARS_GITHUB_TOKEN`, a GitHub token with no extra permissions, to show stars and languages.
+   Optional variables: `DOMAIN` (default `hackergit.org`), `AWS_REGION` (default `us-east-1`).
+3. **Actions → Deploy to AWS Lightsail → Run workflow** (or push to `main`). The run summary shows the server IP.
+4. At your domain registrar, add `A` records for `hackergit.org` and `www.hackergit.org` pointing to that IP.
+
+Logs on the server: `sudo journalctl -u hackergit -f` (connect with the browser SSH button in the Lightsail console).
+
+### Option B: Fly.io (about $2-5/month)
 
 ```bash
 fly launch --copy-config --no-deploy      # pick a unique app name if "hackergit" is taken
@@ -59,7 +84,7 @@ fly certs add www.hackergit.org
 `fly certs add` prints the DNS records to add at your domain registrar (an `A` and `AAAA` record for
 `hackergit.org`, and a `CNAME` for `www`).
 
-### Option B: any VPS (Hetzner, DigitalOcean, etc.)
+### Option C: any VPS with Docker (Hetzner, DigitalOcean, etc.)
 
 ```bash
 git clone <this repo> /opt/hackergit && cd /opt/hackergit

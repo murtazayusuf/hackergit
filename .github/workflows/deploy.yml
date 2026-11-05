@@ -1,0 +1,157 @@
+name: Deploy to AWS Lightsail
+
+# Creates the server on the first run, then updates the code on every push to main.
+# Needs one secret, AWS_ROLE_ARN (see deploy/aws-bootstrap.sh). Optional:
+#   secret   STARS_GITHUB_TOKEN  GitHub token for stars / language / description
+#   variable DOMAIN              default hackergit.org
+#   variable AWS_REGION          default us-east-1
+#   variable BUNDLE_ID           Lightsail plan; default: cheapest 1 GB plan with a public IPv4 address
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "LICENSE", "fly.toml", "Dockerfile", ".dockerignore"]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  DOMAIN: ${{ vars.DOMAIN || 'hackergit.org' }}
+  INSTANCE: hackergit
+  STATIC_IP: hackergit-ip
+  AWS_PAGER: ""
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - id: check
+        env:
+          ROLE: ${{ secrets.AWS_ROLE_ARN }}
+        run: |
+          if [ -n "$ROLE" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Deploy skipped: add the AWS_ROLE_ARN repository secret first (see README)."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  deploy:
+    needs: check
+    if: needs.check.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create the server (first run only)
+        env:
+          BUNDLE: ${{ vars.BUNDLE_ID }}
+        run: |
+          set -euo pipefail
+          if aws lightsail get-instance --instance-name "$INSTANCE" >/dev/null 2>&1; then
+            echo "Server '$INSTANCE' already exists."
+          else
+            if [ -z "$BUNDLE" ]; then
+              BUNDLE=$(aws lightsail get-bundles --output json | jq -r '
+                [.bundles[] | select(.isActive and .ramSizeInGb == 1
+                  and ((.publicIpv4AddressCount // 1) >= 1)
+                  and (.supportedPlatforms | index("LINUX_UNIX"))
+                  and (.bundleId | test("ipv6") | not))]
+                | sort_by(.price) | .[0].bundleId')
+            fi
+            BLUEPRINT=$(aws lightsail get-blueprints --output json | jq -r '
+              [.blueprints[] | select(.isActive and .platform == "LINUX_UNIX"
+                and (.blueprintId | test("^ubuntu_2[4-9]_04$")))]
+              | sort_by(.blueprintId) | .[0].blueprintId')
+            if [ -z "$BUNDLE" ] || [ "$BUNDLE" = null ] || [ -z "$BLUEPRINT" ] || [ "$BLUEPRINT" = null ]; then
+              echo "::error::Could not pick a Lightsail plan ($BUNDLE) or Ubuntu image ($BLUEPRINT)."; exit 1
+            fi
+            echo "Creating '$INSTANCE': $BLUEPRINT on plan $BUNDLE in ${AWS_REGION}a"
+            aws lightsail create-instances --instance-names "$INSTANCE" \
+              --availability-zone "${AWS_REGION}a" --blueprint-id "$BLUEPRINT" --bundle-id "$BUNDLE" \
+              --tags key=app,value=hackergit >/dev/null
+          fi
+          STATE=""
+          for _ in $(seq 1 60); do
+            STATE=$(aws lightsail get-instance --instance-name "$INSTANCE" --query 'instance.state.name' --output text)
+            [ "$STATE" = running ] && break
+            echo "Server state: $STATE"; sleep 5
+          done
+          [ "$STATE" = running ] || { echo "::error::Server did not reach 'running' (state: $STATE)."; exit 1; }
+
+      - name: Static IP and firewall
+        id: ip
+        run: |
+          set -euo pipefail
+          aws lightsail get-static-ip --static-ip-name "$STATIC_IP" >/dev/null 2>&1 \
+            || aws lightsail allocate-static-ip --static-ip-name "$STATIC_IP" >/dev/null
+          ATTACHED=$(aws lightsail get-static-ip --static-ip-name "$STATIC_IP" --query 'staticIp.attachedTo' --output text)
+          if [ "$ATTACHED" != "$INSTANCE" ]; then
+            aws lightsail attach-static-ip --static-ip-name "$STATIC_IP" --instance-name "$INSTANCE" >/dev/null
+          fi
+          aws lightsail put-instance-public-ports --instance-name "$INSTANCE" --port-infos \
+            '[{"fromPort":22,"toPort":22,"protocol":"tcp"},{"fromPort":80,"toPort":80,"protocol":"tcp"},{"fromPort":443,"toPort":443,"protocol":"tcp"}]' >/dev/null
+          IP=$(aws lightsail get-static-ip --static-ip-name "$STATIC_IP" --query 'staticIp.ipAddress' --output text)
+          echo "Server IP: $IP"
+          echo "ip=$IP" >> "$GITHUB_OUTPUT"
+
+      - name: Install or update HackerGit on the server
+        env:
+          IP: ${{ steps.ip.outputs.ip }}
+          STARS_TOKEN: ${{ secrets.STARS_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          # Lightsail hands out a short-lived SSH key + certificate; no key is stored in GitHub.
+          fresh_key() {
+            aws lightsail get-instance-access-details --instance-name "$INSTANCE" --protocol ssh --output json > /tmp/access.json
+            jq -r .accessDetails.privateKey /tmp/access.json > ~/.ssh/lightsail
+            jq -r .accessDetails.certKey /tmp/access.json > ~/.ssh/lightsail-cert.pub
+            SSH_USER=$(jq -r .accessDetails.username /tmp/access.json)
+            chmod 600 ~/.ssh/lightsail && rm -f /tmp/access.json
+          }
+          ssh_run() {
+            ssh -i ~/.ssh/lightsail -o CertificateFile="$HOME/.ssh/lightsail-cert.pub" -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -o ServerAliveInterval=30 "$SSH_USER@$IP" "$@"
+          }
+          for i in $(seq 1 30); do
+            fresh_key
+            if ssh_run true 2>/dev/null; then break; fi
+            [ "$i" = 30 ] && { echo "::error::Could not SSH into $IP."; exit 1; }
+            echo "Waiting for SSH..."; sleep 10
+          done
+          tar czf - hackergit.py server.py static deploy \
+            | ssh_run 'rm -rf /tmp/hackergit-src && mkdir -p /tmp/hackergit-src && tar xzf - -C /tmp/hackergit-src'
+          printf '%s\n' "$STARS_TOKEN" \
+            | ssh_run "sudo env DOMAIN='$DOMAIN' bash /tmp/hackergit-src/deploy/setup.sh /tmp/hackergit-src"
+          rm -f ~/.ssh/lightsail ~/.ssh/lightsail-cert.pub
+
+      - name: Check the site
+        env:
+          IP: ${{ steps.ip.outputs.ip }}
+        run: |
+          curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "http://$IP/healthz"
+          echo
+          {
+            echo "## HackerGit is deployed"
+            echo ""
+            echo "- Server IP: \`$IP\` (open http://$IP to check it)"
+            echo "- DNS at your domain registrar: \`A\` record for \`$DOMAIN\` and \`www.$DOMAIN\` pointing to \`$IP\`"
+            echo "- Then https://$DOMAIN works; HTTPS certificates are set up automatically."
+            echo "- On the very first deploy, repos appear after ~5 minutes and karma after ~15."
+          } >> "$GITHUB_STEP_SUMMARY"

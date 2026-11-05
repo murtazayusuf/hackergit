@@ -1,0 +1,11 @@
+# HTTPS for the domain (Caddy gets and renews the certificate automatically).
+__DOMAIN__, www.__DOMAIN__ {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8080
+}
+
+# Plain HTTP on the server's IP address, so the site can be checked before DNS points here.
+:80 {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8080
+}
