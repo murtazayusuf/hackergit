@@ -24,6 +24,8 @@ import hackergit as hg
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 INDEX = os.path.join(ROOT, "static", "index.html")
+SITE = os.environ.get("SITE_URL", "https://hackergit.org").rstrip("/")
+SITEMAP_CHUNK = 40000  # sitemap files may hold at most 50,000 URLs
 PAGE_SIZE = 30
 
 _local = threading.local()
@@ -212,6 +214,85 @@ def cached_api(path, query):
     return body
 
 
+def cached(key, build):
+    """Cache any computed text until the next index rebuild."""
+    v = data_version()
+    with _cache_lock:
+        hit = _cache.get(key)
+        if hit and hit[0] == v:
+            return hit[1]
+    body = build()
+    with _cache_lock:
+        _cache[key] = (v, body)
+    return body
+
+
+def xml_esc(t):
+    return str(t).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+
+def day(ts):
+    return time.strftime("%Y-%m-%d", time.gmtime(ts or 0))
+
+
+def sitemap_index():
+    n = db().execute("SELECT count(*) FROM repos").fetchone()[0]
+    files = ["sitemaps/pages.xml"] + [f"sitemaps/repos-{i}.xml" for i in range((n + SITEMAP_CHUNK - 1) // SITEMAP_CHUNK)]
+    today = day(time.time())
+    items = "".join(f"<sitemap><loc>{SITE}/{f}</loc><lastmod>{today}</lastmod></sitemap>" for f in files)
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n'
+            f'<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{items}</sitemapindex>\n')
+
+
+def sitemap_urls(urls):
+    items = "".join(f"<url><loc>{xml_esc(loc)}</loc>{f'<lastmod>{lm}</lastmod>' if lm else ''}</url>" for loc, lm in urls)
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n'
+            f'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{items}</urlset>\n')
+
+
+def sitemap_file(name):
+    if name == "pages.xml":
+        return sitemap_urls([(f"{SITE}/", day(time.time())), (f"{SITE}/about", None)])
+    m = re.fullmatch(r"repos-(\d+)\.xml", name)
+    if not m:
+        return None
+    rows = db().execute("SELECT repo, last_time FROM repos ORDER BY key LIMIT ? OFFSET ?",
+                        (SITEMAP_CHUNK, int(m.group(1)) * SITEMAP_CHUNK)).fetchall()
+    if not rows:
+        return None
+    return sitemap_urls([(f"{SITE}/r/{r['repo']}", day(r["last_time"])) for r in rows])
+
+
+_index_html = [None]
+
+
+def page_html(path):
+    """The single-page app, with a real title and description for repo pages (for search engines and link previews)."""
+    if _index_html[0] is None:
+        with open(INDEX, encoding="utf-8") as fh:
+            _index_html[0] = fh.read()
+    html = _index_html[0]
+    m = re.fullmatch(r"/r/([^/]+/[^/]+)/?", path)
+    r = db().execute("SELECT * FROM repos WHERE key = ?", (m.group(1).lower(),)).fetchone() if m else None
+    if not r:
+        if path == "/about":
+            html = html.replace("<title>HackerGit</title>", "<title>About - HackerGit</title>", 1)
+        return html
+    title = f"{r['repo']} on Hacker News - HackerGit"
+    desc = (f"{r['repo']}: {r['points']:,} points and {r['comments']:,} comments across {r['subs']} Hacker News "
+            f"post{'s' if r['subs'] != 1 else ''}. Top post: “{r['top_title']}”."
+            + (f" {r['descr']}" if r["descr"] else ""))[:300]
+    url = f"{SITE}/r/{r['repo']}"
+    t, d, u = xml_esc(title), xml_esc(desc), xml_esc(url)
+    html = html.replace("<title>HackerGit</title>", f"<title>{t}</title>", 1)
+    html = re.sub(r'<meta name="description" content="[^"]*">', f'<meta name="description" content="{d}">', html, count=1)
+    html = re.sub(r'<meta property="og:title" content="[^"]*">', f'<meta property="og:title" content="{t}">', html, count=1)
+    html = re.sub(r'<meta property="og:description" content="[^"]*">', f'<meta property="og:description" content="{d}">', html, count=1)
+    html = html.replace('<link rel="canonical" href="https://hackergit.org/">', f'<link rel="canonical" href="{u}">', 1)
+    html = html.replace('<meta property="og:url" content="https://hackergit.org/">', f'<meta property="og:url" content="{u}">', 1)
+    return html
+
+
 def warm_cache():
     """Precompute the pages most people open, right after the index changes."""
     data_version(force=True)
@@ -279,11 +360,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, body, "application/json",
                                  "no-cache" if u.path == "/api/stats" else "public, max-age=120")
             if u.path == "/robots.txt":
-                return self.send(200, "User-agent: *\nAllow: /\n", "text/plain")
+                return self.send(200, f"User-agent: *\nAllow: /\n\nSitemap: {SITE}/sitemap.xml\n", "text/plain")
+            if u.path == "/sitemap.xml":
+                return self.send(200, cached("sitemap", sitemap_index), "application/xml", "public, max-age=3600")
+            if u.path.startswith("/sitemaps/"):
+                name = u.path[len("/sitemaps/"):]
+                body = cached("sitemap/" + name, lambda: sitemap_file(name) or "")
+                if not body:
+                    return self.send(404, "not found", "text/plain")
+                return self.send(200, body, "application/xml", "public, max-age=3600")
             if u.path == "/healthz":
                 return self.send(200, "ok", "text/plain")
-            with open(INDEX, "rb") as fh:
-                return self.send(200, fh.read(), "text/html; charset=utf-8", "public, max-age=300")
+            return self.send(200, page_html(u.path), "text/html; charset=utf-8", "public, max-age=300")
         except KeyError:
             return self.send(404, '{"error":"not found"}', "application/json")
         except Exception:
