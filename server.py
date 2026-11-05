@@ -25,6 +25,7 @@ import hackergit as hg
 ROOT = os.path.dirname(os.path.abspath(__file__))
 INDEX = os.path.join(ROOT, "static", "index.html")
 SITE = os.environ.get("SITE_URL", "https://hackergit.org").rstrip("/")
+STATIC_FILES = {"/og.png": ("og.png", "image/png")}
 SITEMAP_CHUNK = 40000  # sitemap files may hold at most 50,000 URLs
 PAGE_SIZE = 30
 
@@ -369,6 +370,10 @@ class Handler(BaseHTTPRequestHandler):
                 if not body:
                     return self.send(404, "not found", "text/plain")
                 return self.send(200, body, "application/xml", "public, max-age=3600")
+            if u.path in STATIC_FILES:
+                fname, ctype = STATIC_FILES[u.path]
+                with open(os.path.join(ROOT, "static", fname), "rb") as fh:
+                    return self.send(200, fh.read(), ctype, "public, max-age=86400")
             if u.path == "/healthz":
                 return self.send(200, "ok", "text/plain")
             return self.send(200, page_html(u.path), "text/html; charset=utf-8", "public, max-age=300")
