@@ -117,6 +117,13 @@
   .badgecode { display: flex; gap: 10px; align-items: center; }
   .badgecode code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font-size: 12.5px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
   .badgehint { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
+  .hero-badge { margin-top: 8px !important; font-size: 14px; }
+  .hero-badge a { color: var(--link); font-weight: 600; }
+  .hero-badge a:hover { text-decoration: underline; }
+  .badgeform { display: flex; gap: 10px; margin: 18px 0 4px; flex-wrap: wrap; }
+  .badgeform input { flex: 1 1 260px; min-width: 0; height: 38px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg2); padding: 0 12px; outline: 0; }
+  .badgeform input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .badgehint a { color: var(--link); }
   .badgehint code { font: 12px ui-monospace, monospace; }
   .about { max-width: 720px; font-size: 15px; line-height: 1.65; }
   .about h2 { font-size: 18px; margin: 28px 0 6px; }
@@ -164,6 +171,7 @@
 <footer>
   <span>Data from <a href="https://news.ycombinator.com" rel="noopener">Hacker News</a> via the <a href="https://hn.algolia.com/api" rel="noopener">Algolia HN API</a> and the <a href="https://github.com/HackerNews/API" rel="noopener">official HN API</a>. Not affiliated with Y Combinator or GitHub.</span>
   <a href="/about">About</a>
+  <a href="/badges">README badge</a>
   <a href="https://github.com/murtazayusuf/hackergit" rel="noopener">GitHub</a>
 </footer>
 
@@ -301,7 +309,8 @@ async function renderList() {
 
   view.innerHTML = `
     ${!s.q && !dirty ? `<section class="hero"><h1>Every GitHub repo Hacker News has shared.</h1>
-      <p>${st ? `${fmt(st.repos)} repos from ${fmt(st.stories)} Hacker News posts since ${new Date(st.first * 1000).getUTCFullYear()}. ` : ""}Search them and sort by points, comments, stars, or the karma of whoever posted it.</p></section>` : ""}
+      <p>${st ? `${fmt(st.repos)} repos from ${fmt(st.stories)} Hacker News posts since ${new Date(st.first * 1000).getUTCFullYear()}. ` : ""}Search them and sort by points, comments, stars, or the karma of whoever posted it.</p>
+      <p class="hero-badge">Was your repo on Hacker News? <a href="/badges">Get a badge for your README →</a></p></section>` : ""}
     <section class="controls">
       <div class="row">
         ${SORTS.filter(([k]) => k !== "stars" || hasStars).map(([k, t]) => `<button class="chip${s.sort === k ? " on" : ""}" data-sort="${k}">${t}</button>`).join("")}
@@ -477,6 +486,59 @@ async function loadPageFor(s, page = 0) {
   else tail.innerHTML = "";
 }
 
+function parseRepoInput(t) {
+  t = (t || "").trim().replace(/\.git$/, "").replace(/\/+$/, "");
+  const m = t.match(/(?:github\.com\/)?([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)$/);
+  return m ? `${m[1]}/${m[2]}` : null;
+}
+
+function renderBadges() {
+  document.title = "README badge - HackerGit";
+  const initial = new URLSearchParams(location.search).get("repo") || "";
+  view.innerHTML = `<div class="page about">
+    <h1>A Hacker News badge for your README</h1>
+    <p>If your repo was posted on Hacker News, show how it did. The badge updates by itself and links to every HN post of your repo.</p>
+    <form id="badge-form" class="badgeform">
+      <input id="badge-repo" class="mono" placeholder="owner/repo or a GitHub link" value="${esc(initial)}" autocomplete="off" aria-label="GitHub repo">
+      <button class="chip on" type="submit">Get badge</button>
+    </form>
+    <div id="badge-out"></div>
+    <h2>Options</h2>
+    <ul>
+      <li><code>?show=comments</code> or <code>?show=posts</code> on the image link shows other numbers.</li>
+      <li><code>?label=HN</code> makes the label shorter.</li>
+      <li>Repos never posted on HN get a gray "not posted yet" badge, so a README never shows a broken image.</li>
+    </ul>
+  </div>`;
+  const out = $("#badge-out");
+  const show = async (key) => {
+    history.replaceState({}, "", `/badges?repo=${encodeURIComponent(key)}`);
+    out.innerHTML = `<div class="badgebox"><div class="badgehint">Looking up ${esc(key)}…</div></div>`;
+    const d = await api(`/api/repo?key=${encodeURIComponent(key)}`).catch(() => null);
+    const repo = d ? d.repo.repo : key;
+    const md = `[![Hacker News](https://hackergit.org/badge/${repo}.svg)](https://hackergit.org/r/${repo})`;
+    out.innerHTML = `<div class="badgebox">
+      <div class="badgehead"><b class="mono">${esc(repo)}</b><img src="/badge/${esc(repo)}.svg" alt="Hacker News badge" height="20"></div>
+      ${d ? `<div class="badgecode"><code class="mono" id="badge-md">${esc(md)}</code><button class="chip" id="copy-badge" type="button">Copy</button></div>
+      <div class="badgehint">${fmt(d.repo.points)} points and ${fmt(d.repo.comments)} comments across ${fmt(d.repo.subs)} HN post${d.repo.subs === 1 ? "" : "s"}. <a href="/r/${esc(repo)}">See them</a></div>`
+      : `<div class="badgehint">This repo hasn't been posted on Hacker News yet (as a link to its GitHub page). Check the spelling, or try again after it's been posted.</div>`}
+    </div>`;
+    const cb = $("#copy-badge");
+    if (cb) cb.onclick = async () => {
+      try { await navigator.clipboard.writeText(md); cb.textContent = "Copied"; }
+      catch { const rg = document.createRange(); rg.selectNodeContents($("#badge-md")); getSelection().removeAllRanges(); getSelection().addRange(rg); cb.textContent = "Press Ctrl/Cmd+C"; }
+      setTimeout(() => { cb.textContent = "Copy"; }, 1600);
+    };
+  };
+  $("#badge-form").onsubmit = (e) => {
+    e.preventDefault();
+    const key = parseRepoInput($("#badge-repo").value);
+    if (!key) { out.innerHTML = `<div class="badgebox"><div class="badgehint">Enter it as owner/repo, like karpathy/nanoGPT, or paste the GitHub link.</div></div>`; return; }
+    show(key);
+  };
+  if (parseRepoInput(initial)) show(parseRepoInput(initial)); else $("#badge-repo").focus();
+}
+
 async function renderAbout() {
   document.title = "About - HackerGit";
   const st = await statsP;
@@ -524,6 +586,7 @@ function route() {
   if ((m = p.match(/^\/r\/([^/]+\/[^/]+)\/?$/))) return renderRepo(m[1]);
   if ((m = p.match(/^\/u\/([^/]+)\/?$/))) return renderUser(m[1]);
   if (p === "/about") return renderAbout();
+  if (p === "/badges") return renderBadges();
   return renderList();
 }
 

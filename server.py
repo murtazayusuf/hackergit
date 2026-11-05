@@ -253,7 +253,7 @@ def sitemap_urls(urls):
 
 def sitemap_file(name):
     if name == "pages.xml":
-        return sitemap_urls([(f"{SITE}/", day(time.time())), (f"{SITE}/about", None)])
+        return sitemap_urls([(f"{SITE}/", day(time.time())), (f"{SITE}/about", None), (f"{SITE}/badges", None)])
     m = re.fullmatch(r"repos-(\d+)\.xml", name)
     if not m:
         return None
@@ -278,6 +278,8 @@ def page_html(path):
     if not r:
         if path == "/about":
             html = html.replace("<title>HackerGit</title>", "<title>About - HackerGit</title>", 1)
+        elif path == "/badges":
+            html = html.replace("<title>HackerGit</title>", "<title>Hacker News badge for your README - HackerGit</title>", 1)
         return html
     title = f"{r['repo']} on Hacker News - HackerGit"
     desc = (f"{r['repo']}: {r['points']:,} points and {r['comments']:,} comments across {r['subs']} Hacker News "
