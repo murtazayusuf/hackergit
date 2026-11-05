@@ -112,6 +112,12 @@
   .stat { border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; min-width: 120px; background: var(--bg2); }
   .stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
   .stat span { color: var(--muted); font-size: 12px; }
+  .badgebox { margin: 18px 0 8px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg2); }
+  .badgehead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+  .badgecode { display: flex; gap: 10px; align-items: center; }
+  .badgecode code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font-size: 12.5px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+  .badgehint { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
+  .badgehint code { font: 12px ui-monospace, monospace; }
   .about { max-width: 720px; font-size: 15px; line-height: 1.65; }
   .about h2 { font-size: 18px; margin: 28px 0 6px; }
   .about a { color: var(--link); }
@@ -427,9 +433,22 @@ async function renderRepo(key) {
       ${r.stars != null ? `<div class="stat"><b>${fmt(r.stars)}</b><span>GitHub stars</span></div>` : ""}
     </div>
     <p><a href="https://github.com/${esc(r.repo)}" target="_blank" rel="noopener" style="color:var(--link)">Open on GitHub ↗</a></p>
+    <div class="badgebox">
+      <div class="badgehead"><b>Badge for your README</b><img src="/badge/${esc(r.repo)}.svg" alt="Hacker News badge" height="20"></div>
+      <div class="badgecode"><code class="mono" id="badge-md">[![Hacker News](https://hackergit.org/badge/${esc(r.repo)}.svg)](https://hackergit.org/r/${esc(r.repo)})</code>
+        <button class="chip" id="copy-badge">Copy</button></div>
+      <div class="badgehint">Shows the best points. Add <code>?show=comments</code> or <code>?show=posts</code> to the image link for other numbers. It updates by itself.</div>
+    </div>
     <h2 style="font-size:16px;margin-top:24px">Every time it was posted to Hacker News</h2>
     ${subsList(d.posts)}
   </div>`;
+  const cb = $("#copy-badge");
+  if (cb) cb.onclick = async () => {
+    const text = $("#badge-md").textContent;
+    try { await navigator.clipboard.writeText(text); cb.textContent = "Copied"; }
+    catch { const rg = document.createRange(); rg.selectNodeContents($("#badge-md")); getSelection().removeAllRanges(); getSelection().addRange(rg); cb.textContent = "Press Ctrl/Cmd+C"; }
+    setTimeout(() => { cb.textContent = "Copy"; }, 1600);
+  };
 }
 
 async function renderUser(name) {
@@ -484,6 +503,10 @@ async function renderAbout() {
       <li><code>lang:zig</code> filters by main language (when star data is enabled).</li>
       <li>Under <i>Repos</i>, "Poster karma" is the karma of whoever posted the highest-scoring post. Use <i>HN posts</i> to filter each post by its own poster.</li>
     </ul>
+    <h2>Badge for your README</h2>
+    <p>If your repo was on Hacker News, show it off. Open your repo's page here (search for it) and copy the badge, or use:</p>
+    <p><code>[![Hacker News](https://hackergit.org/badge/owner/repo.svg)](https://hackergit.org/r/owner/repo)</code></p>
+    <p><img src="/badge/karpathy/nanoGPT.svg" alt="Example Hacker News badge" height="20"> &nbsp;Add <code>?show=comments</code> or <code>?show=posts</code> for other numbers.</p>
     <h2>Open source</h2>
     <p>HackerGit's code is on GitHub at <a href="https://github.com/murtazayusuf/hackergit">murtazayusuf/hackergit</a>.
       Found a bug, or want a feature or a different way to slice the data? <a href="https://github.com/murtazayusuf/hackergit/issues">Open an issue</a>

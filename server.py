@@ -294,6 +294,77 @@ def page_html(path):
     return html
 
 
+# ---------------------------------------------------------------- README badges
+
+# Approximate Verdana 11px glyph widths; textLength in the SVG makes the final fit exact.
+_NARROW = {"i": 3.1, "l": 3.1, "j": 3.4, "f": 3.9, "t": 4.3, "r": 4.7, " ": 3.9, ",": 3.6, ".": 3.6,
+           ":": 4.5, "'": 3.0, "(": 4.5, ")": 4.5, "I": 4.2, "-": 4.6}
+_WIDE = {"m": 10.7, "w": 9.0, "M": 9.8, "W": 11.0}
+
+
+def text_width(t):
+    w = 0.0
+    for c in t:
+        if c in _NARROW:
+            w += _NARROW[c]
+        elif c in _WIDE:
+            w += _WIDE[c]
+        elif c.isdigit():
+            w += 7.0
+        elif c.isupper():
+            w += 7.6
+        else:
+            w += 6.4
+    return round(w, 1)
+
+
+def badge_svg(label, value, color="#ff6600"):
+    """A shields.io-style flat badge with a small HN logo."""
+    lw_text, vw_text = text_width(label), text_width(value)
+    logo = 14
+    lw = round(6 + logo + 4 + lw_text + 6)
+    vw = round(6 + vw_text + 6)
+    w = lw + vw
+    lx = (6 + logo + 4 + lw_text / 2) * 10
+    vx = (lw + 6 + vw_text / 2) * 10
+    l, v = xml_esc(label), xml_esc(value)
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="20" role="img" aria-label="{l}: {v}">
+<title>{l}: {v}</title>
+<linearGradient id="s" x2="0" y2="100%"><stop offset="0" stop-color="#bbb" stop-opacity=".1"/><stop offset="1" stop-opacity=".1"/></linearGradient>
+<clipPath id="r"><rect width="{w}" height="20" rx="3" fill="#fff"/></clipPath>
+<g clip-path="url(#r)"><rect width="{lw}" height="20" fill="#555"/><rect x="{lw}" width="{vw}" height="20" fill="{color}"/><rect width="{w}" height="20" fill="url(#s)"/></g>
+<rect x="6" y="3" width="{logo}" height="{logo}" rx="2" fill="#ff6600" stroke="#fff" stroke-opacity=".35"/>
+<text x="13" y="14" fill="#fff" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="10" font-weight="bold" text-anchor="middle">Y</text>
+<g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" text-rendering="geometricPrecision" font-size="110">
+<text aria-hidden="true" x="{lx:.0f}" y="150" fill="#010101" fill-opacity=".3" transform="scale(.1)" textLength="{lw_text * 10:.0f}">{l}</text>
+<text x="{lx:.0f}" y="140" transform="scale(.1)" textLength="{lw_text * 10:.0f}">{l}</text>
+<text aria-hidden="true" x="{vx:.0f}" y="150" fill="#010101" fill-opacity=".3" transform="scale(.1)" textLength="{vw_text * 10:.0f}">{v}</text>
+<text x="{vx:.0f}" y="140" transform="scale(.1)" textLength="{vw_text * 10:.0f}">{v}</text>
+</g></svg>
+"""
+
+
+def badge(path, query):
+    """/badge/<owner>/<repo>.svg?show=points|comments|posts&label=..."""
+    m = re.fullmatch(r"/badge/([A-Za-z0-9-]+)/([A-Za-z0-9._-]+?)(?:\.svg)?", path)
+    if not m:
+        return None
+    p = parse_qs(query)
+    show = (p.get("show") or ["points"])[0]
+    label = ((p.get("label") or ["Hacker News"])[0] or "Hacker News")[:40]
+    key = f"{m.group(1)}/{m.group(2)}".lower()
+    r = db().execute("SELECT points, comments, subs FROM repos WHERE key = ?", (key,)).fetchone()
+    if not r:
+        return badge_svg(label, "not posted yet", "#9f9f9f")
+    if show == "comments":
+        value = f"{r['comments']:,} comment{'s' if r['comments'] != 1 else ''}"
+    elif show == "posts":
+        value = f"{r['subs']:,} post{'s' if r['subs'] != 1 else ''}"
+    else:
+        value = f"{r['points']:,} point{'s' if r['points'] != 1 else ''}"
+    return badge_svg(label, value)
+
+
 def warm_cache():
     """Precompute the pages most people open, right after the index changes."""
     data_version(force=True)
@@ -370,6 +441,11 @@ class Handler(BaseHTTPRequestHandler):
                 if not body:
                     return self.send(404, "not found", "text/plain")
                 return self.send(200, body, "application/xml", "public, max-age=3600")
+            if u.path.startswith("/badge/"):
+                body = cached("badge:" + u.path + "?" + u.query, lambda: badge(u.path, u.query) or "")
+                if not body:
+                    return self.send(404, "not found", "text/plain")
+                return self.send(200, body, "image/svg+xml; charset=utf-8", "public, max-age=3600")
             if u.path in STATIC_FILES:
                 fname, ctype = STATIC_FILES[u.path]
                 with open(os.path.join(ROOT, "static", fname), "rb") as fh:

@@ -104,6 +104,19 @@ hackergit.org, www.hackergit.org {
 
 Point an `A` record for `hackergit.org` (and `www`) at the server's IP.
 
+## README badge
+
+Show how your repo did on Hacker News. Replace `owner/repo` with yours:
+
+```markdown
+[![Hacker News](https://hackergit.org/badge/owner/repo.svg)](https://hackergit.org/r/owner/repo)
+```
+
+[![Hacker News](https://hackergit.org/badge/karpathy/nanoGPT.svg)](https://hackergit.org/r/karpathy/nanoGPT)
+
+Options: `?show=comments` or `?show=posts` for other numbers, `?label=HN` for a shorter label.
+It shows the best-scoring post and updates on its own. Every repo page on hackergit.org has a copy button.
+
 ## API
 
 All endpoints return JSON.
@@ -116,6 +129,8 @@ All endpoints return JSON.
 - `GET /api/repo?key=owner/name`: the repo and every HN post of it
 - `GET /api/user?name=pg`: karma and totals for an HN user
 - `GET /api/stats`
+- `GET /badge/<owner>/<repo>.svg`: README badge (see above)
+- `GET /sitemap.xml`: sitemap index of every repo page
 
 ## How it fits together
 
