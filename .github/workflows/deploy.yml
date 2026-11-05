@@ -137,29 +137,54 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          # Lightsail hands out a short-lived SSH key + certificate; no key is stored in GitHub.
-          fresh_key() {
+          ssh -V
+          # Way 1: Lightsail's short-lived SSH key + certificate (what the console's browser SSH uses).
+          cert_key() {
             aws lightsail get-instance-access-details --instance-name "$INSTANCE" --protocol ssh --output json > /tmp/access.json
-            jq -r .accessDetails.privateKey /tmp/access.json > ~/.ssh/lightsail
-            jq -r .accessDetails.certKey /tmp/access.json > ~/.ssh/lightsail-cert.pub
+            jq -r .accessDetails.privateKey /tmp/access.json > ~/.ssh/ls_cert
+            jq -r .accessDetails.certKey /tmp/access.json > ~/.ssh/ls_cert-cert.pub
             SSH_USER=$(jq -r .accessDetails.username /tmp/access.json)
-            chmod 600 ~/.ssh/lightsail && rm -f /tmp/access.json
+            chmod 600 ~/.ssh/ls_cert && rm -f /tmp/access.json
           }
-          ssh_run() {
-            ssh -i ~/.ssh/lightsail -o CertificateFile="$HOME/.ssh/lightsail-cert.pub" -o IdentitiesOnly=yes \
-              -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -o ServerAliveInterval=30 "$SSH_USER@$IP" "$@"
+          # Way 2: the region's default Lightsail key, which the server was created with.
+          default_key() {
+            K=$(aws lightsail download-default-key-pair --query privateKeyBase64 --output text)
+            if [[ "$K" == -----BEGIN* ]]; then printf '%s\n' "$K" > ~/.ssh/ls_default
+            else printf '%s' "$K" | base64 -d > ~/.ssh/ls_default; fi
+            chmod 600 ~/.ssh/ls_default
           }
+          OPTS=(-o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new
+                -o ConnectTimeout=10 -o ServerAliveInterval=30)
+          try() {  # try <mode> [ssh args...]
+            if [ "$1" = cert ]; then KEY=(-i ~/.ssh/ls_cert -o CertificateFile="$HOME/.ssh/ls_cert-cert.pub")
+            else KEY=(-i ~/.ssh/ls_default); fi
+            shift
+            ssh "${KEY[@]}" "${OPTS[@]}" "${SSH_USER:-ubuntu}@$IP" "$@"
+          }
+          MODE=""
+          default_key || echo "Could not download the default key pair."
           for i in $(seq 1 30); do
-            fresh_key
-            if ssh_run true 2>/dev/null; then break; fi
-            [ "$i" = 30 ] && { echo "::error::Could not SSH into $IP."; exit 1; }
+            cert_key
+            if try cert true 2>/tmp/err.cert; then MODE=cert; break; fi
+            if [ -s ~/.ssh/ls_default ] && try default true 2>/tmp/err.default; then MODE=default; break; fi
+            if [ "$i" = 1 ] || [ $((i % 6)) = 0 ]; then
+              echo "Attempt $i: certificate login: $(tail -1 /tmp/err.cert)"
+              echo "Attempt $i: default key login: $(tail -1 /tmp/err.default 2>/dev/null)"
+            fi
+            if [ "$i" = 30 ]; then
+              echo "::group::Certificate details"; ssh-keygen -L -f ~/.ssh/ls_cert-cert.pub || true; echo "::endgroup::"
+              echo "::group::Verbose SSH (certificate)"; try cert -v true 2>&1 | tail -40 || true; echo "::endgroup::"
+              echo "::group::Verbose SSH (default key)"; try default -v true 2>&1 | tail -40 || true; echo "::endgroup::"
+              echo "::error::Could not SSH into $IP."; exit 1
+            fi
             echo "Waiting for SSH..."; sleep 10
           done
+          echo "Logged in with the $MODE key."
           tar czf - hackergit.py server.py static deploy \
-            | ssh_run 'rm -rf /tmp/hackergit-src && mkdir -p /tmp/hackergit-src && tar xzf - -C /tmp/hackergit-src'
+            | try "$MODE" 'rm -rf /tmp/hackergit-src && mkdir -p /tmp/hackergit-src && tar xzf - -C /tmp/hackergit-src'
           printf '%s\n' "$STARS_TOKEN" \
-            | ssh_run "sudo env DOMAIN='$DOMAIN' bash /tmp/hackergit-src/deploy/setup.sh /tmp/hackergit-src"
-          rm -f ~/.ssh/lightsail ~/.ssh/lightsail-cert.pub
+            | try "$MODE" "sudo env DOMAIN='$DOMAIN' bash /tmp/hackergit-src/deploy/setup.sh /tmp/hackergit-src"
+          rm -f ~/.ssh/ls_cert ~/.ssh/ls_cert-cert.pub ~/.ssh/ls_default
 
       - name: Check the site
         env:
