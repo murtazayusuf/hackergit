@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HackerGit</title>
+<meta name="description" content="Every GitHub repo ever shared on Hacker News. Search and sort by points, comments and the poster's karma.">
+<link rel="canonical" href="https://hackergit.org/">
+<meta property="og:site_name" content="HackerGit">
+<meta property="og:title" content="HackerGit">
+<meta property="og:description" content="Every GitHub repo ever shared on Hacker News. Search and sort by points, comments and the poster's karma.">
+<meta property="og:url" content="https://hackergit.org/">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23ff6600'/%3E%3Ctext x='16' y='23.5' text-anchor='middle' font-family='Helvetica,Arial,sans-serif' font-weight='700' font-size='22' fill='white'%3EH%3C/text%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #ffffff; --bg2: #f6f8fa; --bg3: #eaeef2; --text: #1f2328; --muted: #59636e; --line: #d1d9e0;
+    --accent: #ff6600; --accent-soft: rgba(255,102,0,.12); --link: #0969da; --hover: rgba(0,0,0,.04);
+    --chip-on: #1f2328; --chip-on-text: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d1117; --bg2: #151b23; --bg3: #212830; --text: #e6edf3; --muted: #9198a1; --line: #30363d;
+      --accent-soft: rgba(255,102,0,.18); --link: #4493f8; --hover: rgba(255,255,255,.04);
+      --chip-on: #e6edf3; --chip-on-text: #0d1117;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1117; --bg2: #151b23; --bg3: #212830; --text: #e6edf3; --muted: #9198a1; --line: #30363d;
+    --accent-soft: rgba(255,102,0,.18); --link: #4493f8; --hover: rgba(255,255,255,.04);
+    --chip-on: #e6edf3; --chip-on-text: #0d1117;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  body { font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif; }
+  a { color: inherit; text-decoration: none; }
+  button, select, input { font: inherit; color: inherit; }
+  button { background: none; border: 0; cursor: pointer; padding: 0; }
+  svg.i { width: 16px; height: 16px; fill: currentColor; flex: none; vertical-align: -3px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+
+  header.top { position: sticky; top: 0; z-index: 10; background: var(--bg); border-bottom: 1px solid var(--line); }
+  .bar { max-width: 1040px; margin: 0 auto; height: 60px; padding: 0 16px; display: flex; align-items: center; gap: 16px; }
+  .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 19px; letter-spacing: -.5px; white-space: nowrap; }
+  .logo { width: 28px; height: 28px; border-radius: 7px; background: var(--accent); color: #fff; display: grid; place-items: center; font-size: 18px; }
+  .brand b { color: var(--accent); }
+  .search { flex: 1; display: flex; align-items: center; max-width: 560px; min-width: 0; margin-left: auto; height: 38px;
+            border: 1px solid var(--line); border-radius: 8px; background: var(--bg2); padding: 0 10px; gap: 8px; }
+  .search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; height: 100%; }
+  .search kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; color: var(--muted); }
+  .icon-btn { width: 36px; height: 36px; border-radius: 8px; display: grid; place-items: center; color: var(--muted); flex: none; }
+  .icon-btn:hover { background: var(--hover); color: var(--text); }
+
+  main { max-width: 1040px; margin: 0 auto; padding: 16px 16px 64px; }
+  .hero { padding: 20px 0 8px; }
+  .hero h1 { font-size: 26px; letter-spacing: -.5px; margin: 0 0 4px; }
+  .hero p { margin: 0; color: var(--muted); }
+
+  .controls { display: flex; flex-direction: column; gap: 10px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .tabs { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .tabs button { padding: 5px 14px; color: var(--muted); }
+  .tabs button + button { border-left: 1px solid var(--line); }
+  .tabs button.on { background: var(--accent); color: #fff; font-weight: 600; }
+  .chip { padding: 4px 12px; border-radius: 999px; background: var(--bg2); border: 1px solid var(--line); color: var(--text); white-space: nowrap; }
+  .chip:hover { background: var(--bg3); }
+  .chip.on { background: var(--chip-on); color: var(--chip-on-text); border-color: var(--chip-on); }
+  .label { color: var(--muted); font-size: 12px; margin-right: 2px; }
+  .filters select { height: 30px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg2); padding: 0 6px; max-width: 160px; }
+  .filters label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+  .reset { color: var(--link); font-size: 13px; margin-left: auto; }
+  .summary { color: var(--muted); font-size: 13px; padding: 12px 0 4px; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+
+  .list { list-style: none; margin: 0; padding: 0; }
+  .item { display: grid; grid-template-columns: 40px 1fr; gap: 6px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+  .rank { color: var(--muted); text-align: right; padding-right: 8px; font-variant-numeric: tabular-nums; padding-top: 1px; }
+  .head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .repo { font-size: 16px; font-weight: 600; color: var(--link); word-break: break-word; }
+  .repo:hover { text-decoration: underline; }
+  .repo .own { font-weight: 400; }
+  .gh { display: inline-flex; gap: 12px; color: var(--muted); font-size: 12px; margin-left: auto; white-space: nowrap; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; border: 1px solid rgba(127,127,127,.3); }
+  .title { margin: 3px 0 2px; }
+  .title a:hover { text-decoration: underline; }
+  .descr { color: var(--muted); margin: 2px 0; font-size: 13px; }
+  .meta { color: var(--muted); font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 4px; align-items: center; }
+  .meta a:hover { color: var(--text); text-decoration: underline; }
+  .meta .pts { color: var(--accent); font-weight: 600; }
+  .karma { display: inline-block; padding: 0 6px; border-radius: 999px; background: var(--bg3); font-size: 11.5px; margin-left: 2px; font-variant-numeric: tabular-nums; }
+  .more-subs { color: var(--link); }
+  .subs { margin: 8px 0 0; padding: 8px 12px; background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; font-size: 13px; }
+  .subs div { padding: 4px 0; display: flex; gap: 10px; flex-wrap: wrap; }
+  .subs div + div { border-top: 1px dashed var(--line); }
+  .subs .t { flex: 1 1 260px; }
+  .subs .m { color: var(--muted); font-size: 12px; }
+
+  .loadmore { display: block; margin: 20px auto; padding: 8px 18px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg2); }
+  .loadmore:hover { background: var(--bg3); }
+  .empty, .loading { color: var(--muted); padding: 48px 0; text-align: center; }
+
+  .page h1 { font-size: 24px; margin: 18px 0 6px; word-break: break-word; }
+  .page .crumb { color: var(--muted); font-size: 13px; }
+  .page .crumb a { color: var(--link); }
+  .stats { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
+  .stat { border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; min-width: 120px; background: var(--bg2); }
+  .stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); font-size: 12px; }
+  .about { max-width: 720px; font-size: 15px; line-height: 1.65; }
+  .about h2 { font-size: 18px; margin: 28px 0 6px; }
+  .about a { color: var(--link); }
+  .about code { font: 13px ui-monospace, monospace; background: var(--bg2); padding: 1px 5px; border-radius: 4px; }
+  footer { max-width: 1040px; margin: 0 auto; padding: 24px 16px 48px; color: var(--muted); font-size: 12.5px; border-top: 1px solid var(--line); display: flex; gap: 16px; flex-wrap: wrap; }
+  footer a { color: var(--link); }
+
+  @media (max-width: 640px) {
+    .bar { gap: 8px; }
+    .brand span.word { display: none; }
+    .search kbd { display: none; }
+    .bar { padding: 0 12px; }
+    .icon-btn { width: 32px; }
+    .controls .row:first-child { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 0 16px; }
+    .controls .row:first-child > * { flex: none; }
+    .item { grid-template-columns: 28px 1fr; }
+    .rank { padding-right: 4px; font-size: 12px; }
+    .gh { margin-left: 0; width: 100%; }
+    .hero h1 { font-size: 21px; }
+  }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="bar">
+    <a class="brand" href="/" aria-label="HackerGit home"><span class="logo">H</span><span class="word">Hacker<b>Git</b></span></a>
+    <form class="search" id="search-form" role="search">
+      <svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M10.68 11.74a6 6 0 1 1 1.06-1.06l3.04 3.04a.75.75 0 1 1-1.06 1.06l-3.04-3.04ZM11.5 7a4.5 4.5 0 1 0-9 0 4.5 4.5 0 0 0 9 0Z"/></svg>
+      <input id="q" type="search" placeholder="Search repos, titles…  try  by:karpathy  owner:rust-lang  lang:go" autocomplete="off" aria-label="Search">
+      <kbd>/</kbd>
+    </form>
+    <a class="icon-btn" href="/about" aria-label="About" title="About">
+      <svg class="i" viewBox="0 0 16 16"><path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm6.5-.25A.75.75 0 0 1 7.25 7h1a.75.75 0 0 1 .75.75v2.75h.25a.75.75 0 0 1 0 1.5h-2a.75.75 0 0 1 0-1.5h.25v-2h-.25a.75.75 0 0 1-.75-.75ZM8 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"/></svg>
+    </a>
+    <button class="icon-btn" id="theme" aria-label="Toggle dark mode" title="Toggle dark mode">
+      <svg class="i" viewBox="0 0 16 16"><path d="M8 12a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-1.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm5.66-8.16a.75.75 0 0 1 0 1.06l-1.06 1.06a.75.75 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0ZM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0Zm8 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8ZM8 16a.75.75 0 0 1-.75-.75v-1.5a.75.75 0 0 1 1.5 0v1.5A.75.75 0 0 1 8 16ZM0 8a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5H.75A.75.75 0 0 1 0 8Zm2.34-5.66a.75.75 0 0 1 1.06 0l1.06 1.06a.75.75 0 0 1-1.06 1.06L2.34 3.4a.75.75 0 0 1 0-1.06Zm11.32 11.32a.75.75 0 0 1-1.06 0l-1.06-1.06a.75.75 0 0 1 1.06-1.06l1.06 1.06a.75.75 0 0 1 0 1.06ZM2.34 13.66a.75.75 0 0 1 0-1.06l1.06-1.06a.75.75 0 0 1 1.06 1.06l-1.06 1.06a.75.75 0 0 1-1.06 0Zm11.32-11.32-1.06 1.06"/></svg>
+    </button>
+  </div>
+</header>
+
+<main id="view"></main>
+
+<footer>
+  <span>Data from <a href="https://news.ycombinator.com" rel="noopener">Hacker News</a> via the <a href="https://hn.algolia.com/api" rel="noopener">Algolia HN API</a> and the <a href="https://github.com/HackerNews/API" rel="noopener">official HN API</a>. Not affiliated with Y Combinator or GitHub.</span>
+  <a href="/about">About</a>
+</footer>
+
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const view = $("#view");
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = (n) => Number(n || 0).toLocaleString("en-US");
+const short = (n) => n == null ? "" : n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, "") + "m" : n >= 1e3 ? (n / 1e3).toFixed(1).replace(/\.0$/, "") + "k" : String(n);
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const date = (t) => { const d = new Date(t * 1000); return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`; };
+const ago = (t) => { const s = Date.now() / 1000 - t; if (s < 3600) return `${Math.max(1, Math.round(s / 60))} min ago`; if (s < 86400) return `${Math.round(s / 3600)} h ago`; return `${Math.round(s / 86400)} days ago`; };
+const hn = (id) => `https://news.ycombinator.com/item?id=${id}`;
+const store = { get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+                set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
+
+async function api(path) {
+  const r = await fetch(path);
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+const LANG_COLORS = { Python: "#3572A5", JavaScript: "#f1e05a", TypeScript: "#3178c6", Go: "#00ADD8", Rust: "#dea584",
+  C: "#555555", "C++": "#f34b7d", "C#": "#178600", Java: "#b07219", Ruby: "#701516", Swift: "#F05138", Kotlin: "#A97BFF",
+  PHP: "#4F5D95", Shell: "#89e051", Haskell: "#5e5086", Elixir: "#6e4a7e", Clojure: "#db5855", Scala: "#c22d40",
+  Zig: "#ec915c", Lua: "#000080", "Jupyter Notebook": "#DA5B0B", HTML: "#e34c26", CSS: "#563d7c", Dart: "#00B4AB",
+  OCaml: "#ef7a08", Nim: "#ffc200", Julia: "#a270ba", R: "#198CE7", Perl: "#0298c3", "Objective-C": "#438eff",
+  Erlang: "#B83998", Vue: "#41b883", Svelte: "#ff3e00", Elm: "#60B5CC", Lisp: "#3fb68b", "Common Lisp": "#3fb68b",
+  "Emacs Lisp": "#c065db", Racket: "#3c5caa", V: "#4f87c4", Gleam: "#ffaff3", Odin: "#60AFFE", Crystal: "#000100",
+  "F#": "#b845fc", Vim: "#199f4b", "Vim Script": "#199f4b", Assembly: "#6E4C13", Fortran: "#4d41b1", Solidity: "#AA6746",
+  Nix: "#7e7eff", TeX: "#3D6117", Makefile: "#427819", Dockerfile: "#384d54", MDX: "#fcb32c", Markdown: "#083fa1" };
+
+// ---------------------------------------------------------------- theme
+function applyTheme() { const t = store.get("theme", null); if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme; }
+applyTheme();
+$("#theme").onclick = () => {
+  const dark = document.documentElement.dataset.theme ? document.documentElement.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  store.set("theme", dark ? "light" : "dark"); applyTheme();
+};
+
+// ---------------------------------------------------------------- state <-> URL
+const DEFAULTS = { q: "", view: "repos", sort: "points", min_points: "", min_comments: "", min_karma: "", max_karma: "", min_stars: "", from: "", to: "", lang: "" };
+function readState() {
+  const p = new URLSearchParams(location.search), s = { ...DEFAULTS };
+  for (const k in DEFAULTS) if (p.has(k)) s[k] = p.get(k);
+  return s;
+}
+function stateQuery(s, extra = {}) {
+  const p = new URLSearchParams();
+  for (const k in DEFAULTS) if (s[k] && s[k] !== DEFAULTS[k]) p.set(k, s[k]);
+  for (const k in extra) p.set(k, extra[k]);
+  return p.toString();
+}
+function go(url, replace = false) { history[replace ? "replaceState" : "pushState"]({}, "", url); route(); }
+
+let STATS = null;
+const statsP = api("/api/stats").then(s => (STATS = s)).catch(() => null);
+
+// ---------------------------------------------------------------- list view
+const SORTS = [["points", "Top points"], ["comments", "Most discussed"], ["karma", "Poster karma"], ["stars", "GitHub stars"],
+               ["new", "Newest"], ["subs", "Most shared"], ["old", "Oldest"]];
+const OPT = {
+  min_points: [["", "Any"], ["10", "10+"], ["50", "50+"], ["100", "100+"], ["250", "250+"], ["500", "500+"], ["1000", "1,000+"]],
+  min_comments: [["", "Any"], ["5", "5+"], ["25", "25+"], ["100", "100+"], ["250", "250+"], ["500", "500+"]],
+  karma: [["", "Any"], ["0-100", "Under 100 (new)"], ["0-1000", "Under 1k"], ["1000-", "1k+"], ["5000-", "5k+"], ["10000-", "10k+"], ["50000-", "50k+"], ["100000-", "100k+"]],
+  min_stars: [["", "Any"], ["100", "100+"], ["1000", "1k+"], ["5000", "5k+"], ["10000", "10k+"], ["50000", "50k+"]],
+};
+
+function select(name, opts, value, label) {
+  return `<label>${label}<select data-f="${name}">${opts.map(([v, t]) => `<option value="${v}"${v === value ? " selected" : ""}>${t}</option>`).join("")}</select></label>`;
+}
+
+function renderList() {
+  const s = readState();
+  document.title = s.q ? `${s.q} - HackerGit` : "HackerGit: GitHub repos on Hacker News";
+  $("#q").value = s.q;
+  const years = [], now = new Date().getUTCFullYear();
+  for (let y = now; y >= 2007; y--) years.push([String(y), String(y)]);
+  const karmaVal = (s.min_karma || s.max_karma) ? `${s.min_karma || 0}-${s.max_karma || ""}`.replace(/^0-$/, "") : "";
+  const karmaOpts = OPT.karma.some(o => o[0] === karmaVal) ? OPT.karma : [...OPT.karma, [karmaVal, karmaVal]];
+  const hasStars = STATS && STATS.with_stars > 0;
+  const langs = (STATS && STATS.langs) || [];
+  const dirty = Object.keys(DEFAULTS).some(k => k !== "view" && k !== "q" && s[k] !== DEFAULTS[k]);
+
+  view.innerHTML = `
+    ${!s.q && !dirty ? `<section class="hero"><h1>Every GitHub repo Hacker News has shared.</h1>
+      <p id="hero-sub">Search them and sort by points, comments, or the karma of whoever posted it.</p></section>` : ""}
+    <section class="controls">
+      <div class="row">
+        <div class="tabs" role="tablist">
+          <button data-view="repos" class="${s.view === "repos" ? "on" : ""}" role="tab">Repos</button>
+          <button data-view="posts" class="${s.view === "posts" ? "on" : ""}" role="tab">HN posts</button>
+        </div>
+        ${SORTS.filter(([k]) => k !== "stars" || hasStars).map(([k, t]) => `<button class="chip${s.sort === k ? " on" : ""}" data-sort="${k}">${t}</button>`).join("")}
+      </div>
+      <div class="row filters">
+        ${select("min_points", OPT.min_points, s.min_points, "Points")}
+        ${select("min_comments", OPT.min_comments, s.min_comments, "Comments")}
+        ${select("karma", karmaOpts, karmaVal, "Poster karma")}
+        ${hasStars ? select("min_stars", OPT.min_stars, s.min_stars, "Stars") : ""}
+        ${langs.length ? select("lang", [["", "Any"], ...langs.map(l => [l, l])], s.lang, "Language") : ""}
+        ${select("from", [["", "Any"], ...years], s.from, "From")}
+        ${select("to", [["", "Any"], ...years], s.to, "To")}
+        ${dirty ? `<button class="reset" id="reset">Clear filters</button>` : ""}
+      </div>
+    </section>
+    <div class="summary"><span id="count"></span><span id="fresh"></span></div>
+    <ol class="list" id="list"></ol>
+    <div id="tail"></div>`;
+
+  view.querySelectorAll("[data-view]").forEach(b => b.onclick = () => go("/?" + stateQuery({ ...s, view: b.dataset.view })));
+  view.querySelectorAll("[data-sort]").forEach(b => b.onclick = () => go("/?" + stateQuery({ ...s, sort: b.dataset.sort })));
+  view.querySelectorAll("select[data-f]").forEach(el => el.onchange = () => {
+    const n = { ...s };
+    if (el.dataset.f === "karma") { const [a, b] = el.value.split("-"); n.min_karma = a && a !== "0" ? a : ""; n.max_karma = b || ""; }
+    else n[el.dataset.f] = el.value;
+    go("/?" + stateQuery(n));
+  });
+  const r = $("#reset"); if (r) r.onclick = () => go("/?" + stateQuery({ ...DEFAULTS, q: s.q, view: s.view }));
+
+  statsP.then(st => {
+    if (!st) return;
+    const sub = $("#hero-sub");
+    if (sub) sub.textContent = `${fmt(st.repos)} repos from ${fmt(st.stories)} Hacker News posts since ${new Date(st.first * 1000).getUTCFullYear()}. Search them and sort by points, comments, or the karma of whoever posted it.`;
+    const f = $("#fresh"); if (f && st.last_update) f.textContent = `Updated ${ago(st.last_update)}`;
+  });
+  loadPage(s, 0);
+}
+
+async function loadPage(s, page) {
+  const list = $("#list"), tail = $("#tail");
+  tail.innerHTML = `<div class="loading">Loading…</div>`;
+  let d;
+  try { d = await api(`/api/search?${stateQuery(s, { page })}`); }
+  catch (e) { tail.innerHTML = `<div class="empty">Something went wrong loading results.</div>`; return; }
+  if (readState().q !== s.q || !document.body.contains(list)) return;
+  $("#count").textContent = `${fmt(d.total)} ${s.view === "posts" ? "posts" : "repos"}`;
+  const start = page * d.page_size;
+  list.insertAdjacentHTML("beforeend", d.results.map((r, i) => s.view === "posts" ? postItem(r, start + i + 1) : repoItem(r, start + i + 1)).join(""));
+  if (!d.total) tail.innerHTML = `<div class="empty">No repos match. Try fewer filters.</div>`;
+  else if (start + d.results.length < d.total) {
+    tail.innerHTML = `<button class="loadmore">Load more</button>`;
+    tail.firstChild.onclick = () => loadPage(s, page + 1);
+  } else tail.innerHTML = "";
+}
+
+function repoName(full, href) {
+  const [o, n] = full.split("/");
+  return `<a class="repo mono" href="${href}"><span class="own">${esc(o)} / </span>${esc(n)}</a>`;
+}
+function ghMeta(r) {
+  const bits = [];
+  if (r.lang) bits.push(`<span><span class="dot" style="background:${LANG_COLORS[r.lang] || "#8b949e"}"></span>${esc(r.lang)}</span>`);
+  if (r.stars != null) bits.push(`<span title="${fmt(r.stars)} stars"><svg class="i" viewBox="0 0 16 16"><path d="M8 .25a.75.75 0 0 1 .67.42l1.88 3.8 4.2.61a.75.75 0 0 1 .41 1.28l-3.04 2.96.72 4.18a.75.75 0 0 1-1.09.79L8 12.33l-3.75 1.97a.75.75 0 0 1-1.09-.79l.72-4.18L.84 6.37a.75.75 0 0 1 .41-1.28l4.2-.61L7.33.67A.75.75 0 0 1 8 .25Z"/></svg> ${short(r.stars)}</span>`);
+  return bits.length ? `<span class="gh">${bits.join("")}</span>` : "";
+}
+const userLink = (name, karma) => `<a href="/u/${encodeURIComponent(name)}">${esc(name)}</a>${karma != null ? `<span class="karma" title="Poster karma">${short(karma)}</span>` : ""}`;
+
+function repoItem(r, n) {
+  return `<li class="item"><div class="rank">${n}.</div><div>
+    <div class="head">${repoName(r.repo, `/r/${esc(r.repo)}`)}${ghMeta(r)}</div>
+    <div class="title"><a href="${hn(r.top_id)}" target="_blank" rel="noopener">${esc(r.top_title)}</a></div>
+    ${r.descr ? `<div class="descr">${esc(r.descr)}</div>` : ""}
+    <div class="meta">
+      <span class="pts">${fmt(r.points)} points</span>
+      <a href="${hn(r.top_id)}" target="_blank" rel="noopener">${fmt(r.comments)} comments</a>
+      <span>by ${userLink(r.top_author, r.karma)}</span>
+      <span title="${date(r.first_time)}">${r.subs > 1 ? `${date(r.first_time).slice(-4)}–${date(r.last_time).slice(-4)}` : date(r.first_time)}</span>
+      ${r.subs > 1 ? `<button class="more-subs" data-key="${esc(r.key)}">${r.subs} HN posts</button>` : ""}
+      <a href="https://github.com/${esc(r.repo)}" target="_blank" rel="noopener">GitHub ↗</a>
+    </div><div class="subs-slot"></div></div></li>`;
+}
+
+function postItem(r, n) {
+  return `<li class="item"><div class="rank">${n}.</div><div>
+    <div class="title" style="margin-top:0"><a href="${hn(r.id)}" target="_blank" rel="noopener" style="font-weight:600">${esc(r.title)}</a></div>
+    <div class="head">${repoName(r.repo, `/r/${esc(r.repo)}`)}${ghMeta(r)}</div>
+    <div class="meta">
+      <span class="pts">${fmt(r.points)} points</span>
+      <a href="${hn(r.id)}" target="_blank" rel="noopener">${fmt(r.comments)} comments</a>
+      <span>by ${userLink(r.author, r.karma)}</span>
+      <span>${date(r.time)}</span>
+      <a href="${esc(r.url)}" target="_blank" rel="noopener">GitHub ↗</a>
+    </div></div></li>`;
+}
+
+function subsList(posts) {
+  return `<div class="subs">${posts.map(p => `<div><span class="t"><a href="${hn(p.id)}" target="_blank" rel="noopener">${esc(p.title)}</a></span>
+    <span class="m">${fmt(p.points)} pts · ${fmt(p.comments)} comments · by ${userLink(p.author, p.karma)} · ${date(p.time)}</span></div>`).join("")}</div>`;
+}
+
+view.addEventListener("click", async (e) => {
+  const b = e.target.closest(".more-subs");
+  if (!b) return;
+  const slot = b.closest(".item").querySelector(".subs-slot");
+  if (slot.innerHTML) { slot.innerHTML = ""; return; }
+  const d = await api(`/api/repo?key=${encodeURIComponent(b.dataset.key)}`);
+  if (d) slot.innerHTML = subsList(d.posts);
+});
+
+// ---------------------------------------------------------------- repo + user pages
+async function renderRepo(key) {
+  view.innerHTML = `<div class="loading">Loading…</div>`;
+  const d = await api(`/api/repo?key=${encodeURIComponent(key)}`);
+  if (!d) { view.innerHTML = `<div class="page"><h1 class="mono">${esc(key)}</h1><p>This repo hasn't been shared on Hacker News (yet). <a href="https://github.com/${esc(key)}" style="color:var(--link)">Open on GitHub ↗</a></p></div>`; return; }
+  const r = d.repo;
+  document.title = `${r.repo} on Hacker News - HackerGit`;
+  view.innerHTML = `<div class="page">
+    <div class="crumb"><a href="/">HackerGit</a> / <a href="/?q=owner:${encodeURIComponent(r.owner)}">${esc(r.owner)}</a></div>
+    <h1 class="mono">${esc(r.repo)}</h1>
+    ${r.descr ? `<p class="descr" style="font-size:15px">${esc(r.descr)}</p>` : ""}
+    <div class="stats">
+      <div class="stat"><b>${fmt(r.points)}</b><span>best points</span></div>
+      <div class="stat"><b>${fmt(r.comments)}</b><span>comments (all posts)</span></div>
+      <div class="stat"><b>${fmt(r.subs)}</b><span>HN posts</span></div>
+      ${r.stars != null ? `<div class="stat"><b>${fmt(r.stars)}</b><span>GitHub stars</span></div>` : ""}
+    </div>
+    <p><a href="https://github.com/${esc(r.repo)}" target="_blank" rel="noopener" style="color:var(--link)">Open on GitHub ↗</a></p>
+    <h2 style="font-size:16px;margin-top:24px">Every time it was posted to Hacker News</h2>
+    ${subsList(d.posts)}
+  </div>`;
+}
+
+async function renderUser(name) {
+  const u = await api(`/api/user?name=${encodeURIComponent(name)}`);
+  const s = { ...DEFAULTS, view: "posts", sort: "points", q: `by:${name}` };
+  history.replaceState({}, "", `/u/${encodeURIComponent(name)}`);
+  view.innerHTML = `<div class="page">
+    <div class="crumb"><a href="/">HackerGit</a> / user</div>
+    <h1>${esc(name)}</h1>
+    ${u ? `<div class="stats">
+      <div class="stat"><b>${fmt(u.karma)}</b><span>HN karma</span></div>
+      <div class="stat"><b>${fmt(u.posts)}</b><span>GitHub repos posted</span></div>
+      <div class="stat"><b>${fmt(u.points)}</b><span>points from them</span></div>
+      ${u.created ? `<div class="stat"><b>${new Date(u.created * 1000).getUTCFullYear()}</b><span>joined HN</span></div>` : ""}
+    </div>` : ""}
+    <p><a href="https://news.ycombinator.com/user?id=${encodeURIComponent(name)}" target="_blank" rel="noopener" style="color:var(--link)">HN profile ↗</a></p>
+  </div><ol class="list" id="list"></ol><div id="tail"></div><span id="count" hidden></span>`;
+  document.title = `${name} - HackerGit`;
+  loadPageFor(s);
+}
+async function loadPageFor(s, page = 0) {
+  const list = $("#list"), tail = $("#tail");
+  const d = await api(`/api/search?${stateQuery(s, { page })}`);
+  list.insertAdjacentHTML("beforeend", d.results.map((r, i) => postItem(r, page * d.page_size + i + 1)).join(""));
+  if ((page + 1) * d.page_size < d.total) { tail.innerHTML = `<button class="loadmore">Load more</button>`; tail.firstChild.onclick = () => loadPageFor(s, page + 1); }
+  else tail.innerHTML = "";
+}
+
+async function renderAbout() {
+  document.title = "About - HackerGit";
+  const st = await statsP;
+  view.innerHTML = `<article class="about page">
+    <h1>About HackerGit</h1>
+    <p>Hacker News has been the place people show off what they built since 2007, and a lot of what they built lives on GitHub.
+      HackerGit collects every one of those links${st ? ` (${fmt(st.repos)} repos from ${fmt(st.stories)} posts)` : ""} so you can search them and
+      sort by what HN thought of them: points, comments, and the karma of the person who shared it.</p>
+    <h2>How it works</h2>
+    <ul>
+      <li><b>Stories</b> come from the <a href="https://hn.algolia.com/api">Algolia HN Search API</a>, which indexes every HN item.
+        We ask it for every story whose URL is on <code>github.com</code>, walking back through time 1,000 at a time.</li>
+      <li><b>Karma</b> comes from the <a href="https://github.com/HackerNews/API">official HN API</a>, one lookup per poster,
+        refreshed weekly.</li>
+      <li><b>Stars, language and descriptions</b> come from the GitHub API, when enabled.</li>
+      <li>New posts are picked up every few minutes, and points and comment counts keep updating for a few days after a post.</li>
+      <li>Links to a file or folder inside a repo count for that repo. The same repo posted several times shows up once under
+        <i>Repos</i>, with every post listed; <i>HN posts</i> shows each post separately.</li>
+    </ul>
+    <h2>Search tips</h2>
+    <ul>
+      <li><code>by:username</code> shows repos a given HN user posted.</li>
+      <li><code>owner:rust-lang</code> limits results to one GitHub user or org.</li>
+      <li><code>lang:zig</code> filters by main language (when star data is enabled).</li>
+      <li>Under <i>Repos</i>, "Poster karma" is the karma of whoever posted the highest-scoring post. Use <i>HN posts</i> to filter each post by its own poster.</li>
+    </ul>
+    <h2>Credits</h2>
+    <p>Inspired by <a href="https://hackertube.org">HackerTube</a>. Hacker News content belongs to its authors. Not affiliated with Y Combinator or GitHub.</p>
+  </article>`;
+}
+
+// ---------------------------------------------------------------- router
+function route() {
+  const p = decodeURIComponent(location.pathname);
+  window.scrollTo(0, 0);
+  let m;
+  if ((m = p.match(/^\/r\/([^/]+\/[^/]+)\/?$/))) return renderRepo(m[1]);
+  if ((m = p.match(/^\/u\/([^/]+)\/?$/))) return renderUser(m[1]);
+  if (p === "/about") return renderAbout();
+  return renderList();
+}
+
+document.addEventListener("click", (e) => {
+  const a = e.target.closest("a");
+  if (!a || a.target === "_blank" || e.metaKey || e.ctrlKey || e.shiftKey || a.origin !== location.origin) return;
+  e.preventDefault(); go(a.pathname + a.search);
+});
+window.addEventListener("popstate", route);
+$("#search-form").onsubmit = (e) => {
+  e.preventDefault();
+  const s = location.pathname === "/" ? readState() : { ...DEFAULTS };
+  go("/?" + stateQuery({ ...s, q: $("#q").value.trim() }));
+};
+document.addEventListener("keydown", (e) => {
+  if (e.key === "/" && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) { e.preventDefault(); $("#q").focus(); }
+});
+statsP.finally(route);
+</script>
+</body>
+</html>

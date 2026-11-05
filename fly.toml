@@ -1,0 +1,25 @@
+# Deploy with:  fly launch --copy-config --no-deploy && fly volumes create data --size 1 && fly deploy
+app = "hackergit"
+primary_region = "iad"
+
+[build]
+
+[env]
+  PORT = "8080"
+  HACKERGIT_DB = "/data/hackergit.db"
+  UPDATE_MINUTES = "10"
+
+[[mounts]]
+  source = "data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
