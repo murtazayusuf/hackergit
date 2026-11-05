@@ -268,8 +268,10 @@ def refresh_karma(con, limit=None, stale_days=7, workers=24):
 
 # ---------------------------------------------------------------- GitHub stars (optional)
 
-def refresh_github(con, limit=3000, stale_days=14):
+def refresh_github(con, limit=25000, stale_days=14):
     if not GITHUB_TOKEN:
+        meta_set(con, "github_status", "no token set")
+        con.commit()
         return 0
     now = int(time.time())
     keys = [r[0] for r in con.execute("""
@@ -290,8 +292,16 @@ def refresh_github(con, limit=3000, stale_days=14):
                           headers={"Authorization": f"bearer {GITHUB_TOKEN}"}, retries=3)
         except Exception as e:
             log("github: request failed:", e)
+            meta_set(con, "github_status", f"error: {e}"[:200])
+            con.commit()
             break
-        data = d.get("data") or {}
+        data = d.get("data")
+        if not data:  # bad token, rate limit, etc.: keep the repos queued instead of marking them missing
+            msg = "; ".join(x.get("message", "") for x in d.get("errors") or []) or "no data returned"
+            log("github: error:", msg)
+            meta_set(con, "github_status", f"error: {msg}"[:200])
+            con.commit()
+            break
         rows = []
         for j, k in enumerate(chunk):
             r = data.get(f"r{j}")
@@ -306,6 +316,8 @@ def refresh_github(con, limit=3000, stale_days=14):
         time.sleep(0.5)
     if done:
         log(f"github: refreshed {done} repos")
+        meta_set(con, "github_status", f"ok: {done} repos refreshed at {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())}")
+        con.commit()
     return done
 
 
@@ -367,6 +379,7 @@ def stats(con):
         "first": q("SELECT min(time) FROM stories"),
         "last": q("SELECT max(time) FROM stories"),
         "last_update": int(meta_get(con, "last_update", 0) or 0),
+        "github_status": meta_get(con, "github_status", "not run yet"),
     }
 
 
