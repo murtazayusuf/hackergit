@@ -214,6 +214,37 @@ def search(p):
             "results": [dict(r) for r in rows]}
 
 
+TRENDING = {"day": 86400, "week": 7 * 86400, "month": 30 * 86400}
+
+
+def trending(period="day", show=False, limit=30):
+    """Top GitHub repos by their best HN post in the last day / week / month, with live rank info."""
+    since = int(time.time()) - TRENDING.get(period, 86400)
+    rows = db().execute(f"""SELECT s.id AS sid, s.title AS stitle, s.points AS spoints, s.comments AS scomments,
+            s.author AS sauthor, s.time AS stime, coalesce(u.karma, 0) AS skarma,
+            f.best_pos AS front_best, sh.best_pos AS show_best, r.*
+            FROM stories s JOIN repos r ON r.key = lower(s.repo)
+            LEFT JOIN users u ON u.name = s.author
+            LEFT JOIN ranks f ON f.id = s.id AND f.list = 'front'
+            LEFT JOIN ranks sh ON sh.id = s.id AND sh.list = 'show'
+            WHERE s.time > ? {"AND s.title LIKE 'Show HN%'" if show else ""}
+            ORDER BY s.points DESC LIMIT 400""", (since,)).fetchall()
+    out, seen = [], set()
+    for x in rows:
+        if x["key"] in seen:
+            continue
+        seen.add(x["key"])
+        d = dict(x)
+        d.update(top_id=x["sid"], top_title=x["stitle"], points=x["spoints"], comments=x["scomments"],
+                 top_author=x["sauthor"], karma=x["skarma"], post_time=x["stime"])
+        for k in ("sid", "stitle", "spoints", "scomments", "sauthor", "stime", "skarma"):
+            d.pop(k)
+        out.append(d)
+        if len(out) >= limit:
+            break
+    return {"period": period, "show": show, "results": out}
+
+
 def repo_detail(key):
     con = db()
     r = con.execute("SELECT * FROM repos WHERE key = ?", (key.lower(),)).fetchone()
@@ -306,7 +337,7 @@ def sitemap_urls(urls):
 
 def sitemap_file(name):
     if name == "pages.xml":
-        return sitemap_urls([(f"{SITE}/", day(time.time())), (f"{SITE}/show-hn", day(time.time())), (f"{SITE}/badges", None), (f"{SITE}/about", None)])
+        return sitemap_urls([(f"{SITE}/", day(time.time())), (f"{SITE}/trending", day(time.time())), (f"{SITE}/show-hn", day(time.time())), (f"{SITE}/badges", None), (f"{SITE}/about", None)])
     m = re.fullmatch(r"repos-(\d+)\.xml", name)
     if not m:
         return None
@@ -369,6 +400,14 @@ def page_content(path):
         return (200, "Best Show HN projects on GitHub - HackerGit",
                 f"The best Show HN projects: {n:,} open source GitHub repos launched on Hacker News, ranked by points "
                 "and comments. Find hidden gems from first-time posters.", SITE + "/show-hn", body, site_ld)
+    if path == "/trending":
+        rows = [dict(x) for x in trending("day")["results"]]
+        body = ('<section class="hero"><h1>Trending on Hacker News: GitHub repos today</h1>'
+                '<p>The GitHub repos getting the most attention on Hacker News in the last 24 hours, with live front page '
+                'and Show HN positions. Switch to this week or this month.</p></section>' + _repo_items(rows))
+        return (200, "Trending GitHub repos on Hacker News today - HackerGit",
+                "GitHub repos trending on Hacker News today, this week and this month: points, comments, front page and "
+                "Show HN rankings, updated every few minutes.", SITE + "/trending", body, site_ld)
     if path == "/badges":
         body = (f'<div class="page about"><h1>Hacker News badge for your GitHub README</h1>{BADGE_TEXT}'
                 '<p><img src="/badge/karpathy/nanoGPT.svg?style=card" alt="Hacker News badge example" width="250" height="55"></p>'
@@ -618,6 +657,9 @@ def api(path, p):
         return repo_detail((p.get("key") or [""])[0])
     if path == "/api/user":
         return user_detail((p.get("name") or [""])[0])
+    if path == "/api/trending":
+        period = (p.get("period") or ["day"])[0]
+        return trending(period if period in TRENDING else "day", (p.get("show") or ["0"])[0] == "1")
     if path == "/api/stats":
         con = db()
         s = hg.stats(con)
