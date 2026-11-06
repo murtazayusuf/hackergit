@@ -108,7 +108,9 @@ CREATE TABLE IF NOT EXISTS repos (
   stars INTEGER, lang TEXT, descr TEXT,
   kinds TEXT,                      -- e.g. ",show,ask," : HN post types this repo has
   show_id INTEGER, show_title TEXT, show_points INTEGER, show_comments INTEGER,  -- best Show HN post
-  show_author TEXT, show_karma INTEGER
+  show_author TEXT, show_karma INTEGER,
+  ach_id INTEGER, ach_points INTEGER, ach_rank INTEGER,          -- best achievement (see rebuild)
+  ach_period TEXT, ach_scope TEXT, ach_date TEXT
 );
 CREATE INDEX IF NOT EXISTS repos_points ON repos(points);
 CREATE INDEX IF NOT EXISTS repos_comments ON repos(comments);
@@ -139,7 +141,7 @@ def connect(readonly=False):
     else:
         con = sqlite3.connect(DB_PATH, timeout=60)
         cols = {r[1] for r in con.execute("PRAGMA table_info(repos)")}
-        migrate = bool(cols) and "kinds" not in cols
+        migrate = bool(cols) and "ach_rank" not in cols
         if migrate:
             con.execute("DROP TABLE repos")
         con.executescript(SCHEMA)
@@ -541,11 +543,50 @@ def rebuild(con):
     """Recompute per-repo aggregates and the repo search index in one transaction."""
     t = time.time()
     con.execute("BEGIN IMMEDIATE")
+    # Each repo's best achievement: its rank among GitHub posts on HN (by points) for the day / week / month /
+    # year of the post, or among Show HN posts, or its best live position on the front page / Show HN page.
+    # Lower score = more impressive (a #2 of the year beats a #1 of the day).
+    con.execute("DROP TABLE IF EXISTS temp.ach")
+    con.execute("""
+        CREATE TEMP TABLE ach AS
+        WITH s AS (
+          SELECT id, lower(repo) AS k, points, (title LIKE 'Show HN%') AS sh,
+                 date(time, 'unixepoch') AS d, date(time, 'unixepoch', '-6 days', 'weekday 1') AS w,
+                 strftime('%Y-%m', time, 'unixepoch') AS m, strftime('%Y', time, 'unixepoch') AS y
+          FROM stories WHERE points >= 20
+        ), r AS (
+          SELECT *, rank() OVER (PARTITION BY d ORDER BY points DESC) AS rd,
+                    rank() OVER (PARTITION BY w ORDER BY points DESC) AS rw,
+                    rank() OVER (PARTITION BY m ORDER BY points DESC) AS rm,
+                    rank() OVER (PARTITION BY y ORDER BY points DESC) AS ry,
+                    rank() OVER (PARTITION BY sh, d ORDER BY points DESC) AS sd,
+                    rank() OVER (PARTITION BY sh, w ORDER BY points DESC) AS sw,
+                    rank() OVER (PARTITION BY sh, m ORDER BY points DESC) AS sm,
+                    rank() OVER (PARTITION BY sh, y ORDER BY points DESC) AS sy
+          FROM s
+        ), c AS (
+          SELECT k, id, points, rd AS rk, 'day' AS per, 'all' AS sc, d AS dt, rd * 10.0 AS score FROM r WHERE rd <= 10
+          UNION ALL SELECT k, id, points, rw, 'week', 'all', w, rw * 4.0 FROM r WHERE rw <= 10
+          UNION ALL SELECT k, id, points, rm, 'month', 'all', m, rm * 2.0 FROM r WHERE rm <= 10
+          UNION ALL SELECT k, id, points, ry, 'year', 'all', y, ry * 1.0 FROM r WHERE ry <= 10
+          UNION ALL SELECT k, id, points, sd, 'day', 'show', d, sd * 20.0 FROM r WHERE sh AND sd <= 10
+          UNION ALL SELECT k, id, points, sw, 'week', 'show', w, sw * 8.0 FROM r WHERE sh AND sw <= 10
+          UNION ALL SELECT k, id, points, sm, 'month', 'show', m, sm * 4.0 FROM r WHERE sh AND sm <= 10
+          UNION ALL SELECT k, id, points, sy, 'year', 'show', y, sy * 2.0 FROM r WHERE sh AND sy <= 10
+          UNION ALL SELECT lower(st.repo), st.id, st.points, rk.best_pos, 'live', rk.list,
+                           date(rk.best_at, 'unixepoch'), rk.best_pos * (CASE rk.list WHEN 'front' THEN 1.5 ELSE 3.0 END)
+                    FROM ranks rk JOIN stories st ON st.id = rk.id WHERE rk.best_pos <= 30 AND st.points >= 10
+        )
+        SELECT k, id, points, rk, per, sc, dt FROM (
+          SELECT *, row_number() OVER (PARTITION BY k ORDER BY score, rk, points DESC) AS rn FROM c
+        ) WHERE rn = 1
+    """)
     con.execute("DELETE FROM repos")
     con.execute("""
         INSERT INTO repos(key, repo, owner, name, subs, points, total_points, comments, first_time, last_time,
                           top_id, top_title, top_author, karma, max_karma, stars, lang, descr,
-                          kinds, show_id, show_title, show_points, show_comments, show_author, show_karma)
+                          kinds, show_id, show_title, show_points, show_comments, show_author, show_karma,
+                          ach_id, ach_points, ach_rank, ach_period, ach_scope, ach_date)
         WITH s AS (
           SELECT st.*, lower(st.repo) AS k, coalesce(u.karma, 0) AS karma,
                  row_number() OVER (PARTITION BY lower(st.repo) ORDER BY st.points DESC, st.time) AS rn
@@ -566,9 +607,11 @@ def rebuild(con):
         SELECT a.k, t.repo, substr(t.repo, 1, instr(t.repo, '/') - 1), substr(t.repo, instr(t.repo, '/') + 1),
                a.subs, a.points, a.total_points, a.comments, a.first_time, a.last_time,
                t.id, t.title, t.author, t.karma, a.max_karma, g.stars, g.lang, g.descr,
-               a.kinds, sh.id, sh.title, sh.points, sh.comments, sh.author, sh.karma
+               a.kinds, sh.id, sh.title, sh.points, sh.comments, sh.author, sh.karma,
+               ac.id, ac.points, ac.rk, ac.per, ac.sc, ac.dt
         FROM agg a JOIN s t ON t.k = a.k AND t.rn = 1
         LEFT JOIN sh ON sh.k = a.k AND sh.rn = 1
+        LEFT JOIN temp.ach ac ON ac.k = a.k
         LEFT JOIN github g ON g.key = a.k
     """)
     con.execute("DELETE FROM repos_fts")

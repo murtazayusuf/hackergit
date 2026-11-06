@@ -509,24 +509,59 @@ def _w(t, size, bold=False):
     return base * (1.12 if bold else 1.0)
 
 
-def badge_card(label, big, small, theme="light", muted=False):
+_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+           "November", "December"]
+
+
+def _nice_date(d):
+    y, m, dd = (d.split("-") + ["", ""])[:3]
+    return f"{_MONTHS[int(m) - 1][:3]} {int(dd)}, {y}" if dd else f"{_MONTHS[int(m) - 1]} {y}" if m else y
+
+
+def ach_label(r):
+    """('#1 Repo of the Day', 'Jan 11, 2023 · 1,532 points') for a repo's best achievement, or None."""
+    if not r or r["ach_rank"] is None:
+        return None
+    rank, per, sc, dt, pts = r["ach_rank"], r["ach_period"], r["ach_scope"], r["ach_date"], r["ach_points"]
+    noun = "Show HN" if sc == "show" else "Repo"
+    when = {"day": _nice_date(dt), "week": f"Week of {_nice_date(dt)}", "month": _nice_date(dt),
+            "year": "", "live": _nice_date(dt)}.get(per, "")
+    small = f"{when} \u00b7 {pts:,} points" if when else f"{pts:,} points on Hacker News"
+    if per == "live":
+        return (f"#{rank} on the Front Page" if sc == "front" else f"#{rank} on Show HN"), small
+    if per == "year":
+        return f"#{rank} {noun} of {dt}", small
+    return f"#{rank} {noun} of the {per.title()}", small
+
+
+def badge_card(label, big, small, theme="light", muted=False, icon=None):
     """A 250x55 card badge (the size Trendshift and similar README cards use); wider only if the text needs it."""
     dark = theme == "dark"
     bg, fg, sub = ("#0d1117", "#e6edf3", "#9198a1") if dark else ("#ffffff", "#1f2328", "#59636e")
     accent = "#9198a1" if muted else "#ff6600"
-    tx, h = 57, 55
-    w = max(250, round(tx + max(_w(label, 9.5) * 1.18, _w(big, 17, True), _w(small, 10.5)) + 14))
+    tx, h, w = 57, 55, 250
+    room = w - tx - 12
+    # calibrated against browser rendering; shrink long text so the card stays 250 wide (like Trendshift's)
+    big_fs = max(12.5, min(17.0, 17.0 * room / max(1, _w(big, 17, True) * 0.87)))
+    small_fs = max(9.0, min(10.5, 10.5 * room / max(1, _w(small, 10.5) * 0.87)))
     L, B, S = xml_esc(label), xml_esc(big), xml_esc(small)
     font = "-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans',Helvetica,Arial,sans-serif"
+    if icon:  # e.g. "#1": rank inside the icon, like a medal
+        fs = 15 if len(icon) <= 2 else 12
+        icon_svg = (f'<text x="28.5" y="{27.5 + fs * 0.36:.1f}" fill="#fff" font-family="{font}" font-size="{fs}" '
+                    f'font-weight="800" text-anchor="middle">{xml_esc(icon)}</text>')
+    else:
+        icon_svg = ('<text x="28.5" y="35" fill="#fff" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" '
+                    'font-size="21" font-weight="bold" text-anchor="middle">Y</text>')
     return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}" role="img" aria-label="{L}: {B}, {S}">
 <title>{L}: {B}, {S}</title>
 <rect x="1" y="1" width="{w - 2}" height="{h - 2}" rx="9" fill="{bg}" stroke="{accent}" stroke-width="1.5"/>
 <rect x="12" y="11" width="33" height="33" rx="7" fill="{accent}"/>
-<text x="28.5" y="35" fill="#fff" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="21" font-weight="bold" text-anchor="middle">Y</text>
+{icon_svg}
 <g font-family="{font}">
 <text x="{tx}" y="18.5" fill="{accent}" font-size="9.5" font-weight="600" letter-spacing=".6">{L.upper()}</text>
-<text x="{tx}" y="35" fill="{fg}" font-size="17" font-weight="700">{B}</text>
-<text x="{tx}" y="47.5" fill="{sub}" font-size="10.5">{S}</text>
+<text x="{tx}" y="35" fill="{fg}" font-size="{big_fs:.1f}" font-weight="700">{B}</text>
+<text x="{tx}" y="47.5" fill="{sub}" font-size="{small_fs:.1f}">{S}</text>
 </g></svg>
 """
 
@@ -540,8 +575,14 @@ def badge(path, query):
     show = (p.get("show") or ["points"])[0]
     label = ((p.get("label") or ["Hacker News"])[0] or "Hacker News")[:40]
     key = f"{m.group(1)}/{m.group(2)}".lower()
-    r = db().execute("SELECT points, comments, subs FROM repos WHERE key = ?", (key,)).fetchone()
-    if (p.get("style") or [""])[0] == "card":
+    r = db().execute("SELECT * FROM repos WHERE key = ?", (key,)).fetchone()
+    style = (p.get("style") or [""])[0]
+    if style == "rank":
+        lab = ach_label(r)
+        if lab:
+            return badge_card(label, lab[0], lab[1], (p.get("theme") or ["light"])[0], icon=f"#{r['ach_rank']}")
+        style = "card"  # no ranking: fall back to the points card
+    if style == "card":
         theme = (p.get("theme") or ["light"])[0]
         if not r:
             return badge_card(label, "Not posted yet", "No Hacker News posts found", theme, muted=True)

@@ -121,6 +121,9 @@
   .stat span { color: var(--muted); font-size: 12px; }
   .repohead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   .repohead h1 { margin-right: auto; }
+  .ach { display: inline-flex; align-items: center; gap: 10px; margin: 10px 0 2px; padding: 6px 14px 6px 6px; border: 1px solid var(--accent); border-radius: 999px; background: var(--accent-soft); font-size: 14px; }
+  .ach-medal { background: var(--accent); color: #fff; font-weight: 800; border-radius: 999px; padding: 3px 9px; font-size: 13px; }
+  .ach-when { color: var(--muted); }
   .repostats { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 13.5px; margin: 10px 0 6px; align-items: center; }
   .repostats b { color: var(--text); font-variant-numeric: tabular-nums; }
   h2.sect { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin: 26px 0 10px; }
@@ -542,6 +545,7 @@ async function renderRepo(key) {
       <a class="chip" href="https://github.com/${esc(r.repo)}" target="_blank" rel="noopener">GitHub ↗</a>
     </div>
     ${r.descr ? `<p class="descr" style="font-size:15px;margin:4px 0 0">${esc(r.descr)}</p>` : ""}
+    ${achLabel(r) ? `<div class="ach"><span class="ach-medal">#${r.ach_rank}</span><span><b>${esc(achLabel(r))}</b> on Hacker News <span class="ach-when">· ${esc(achWhen(r))}</span></span></div>` : ""}
     <div class="repostats">
       <span><b>${fmt(r.points)}</b> best points</span>
       <span><b>${fmt(r.comments)}</b> comments</span>
@@ -587,12 +591,27 @@ async function loadPageFor(s, page = 0) {
   else tail.innerHTML = "";
 }
 
+// "#1 Repo of the Day" style label for a repo's best achievement (mirrors ach_label on the server).
+function achLabel(r) {
+  if (!r || r.ach_rank == null) return null;
+  const noun = r.ach_scope === "show" ? "Show HN" : "Repo";
+  if (r.ach_period === "live") return `#${r.ach_rank} on ${r.ach_scope === "front" ? "the Front Page" : "Show HN"}`;
+  if (r.ach_period === "year") return `#${r.ach_rank} ${noun} of ${r.ach_date}`;
+  return `#${r.ach_rank} ${noun} of the ${r.ach_period[0].toUpperCase() + r.ach_period.slice(1)}`;
+}
+function achWhen(r) {
+  const d = r.ach_date || "";
+  const [y, m, dd] = d.split("-");
+  const long = dd ? date(Date.UTC(+y, m - 1, +dd) / 1000) : m ? new Date(Date.UTC(+y, m - 1, 1)).toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" }) : y;
+  return r.ach_period === "week" ? `week of ${long}` : long;
+}
+
 // Badge picker shared by repo pages and /badges: style + where the badge links to.
 function badgeBox(r, title) {
   return `<div class="badgebox" id="badgebox">
     <div class="badgehead"><b>${title}</b>
       <div class="seg" role="group" aria-label="Badge style">
-        <button type="button" data-bs="card" class="on">Card</button><button type="button" data-bs="small">Small</button><button type="button" data-bs="card-dark">Card (dark)</button>
+        ${r.ach_rank != null ? `<button type="button" data-bs="rank" class="on">Rank</button><button type="button" data-bs="rank-dark">Rank (dark)</button>` : ""}<button type="button" data-bs="card"${r.ach_rank == null ? ' class="on"' : ""}>Card</button><button type="button" data-bs="card-dark">Card (dark)</button><button type="button" data-bs="small">Small</button>
       </div>
     </div>
     <div class="badgepreview" id="badge-preview"></div>
@@ -610,9 +629,10 @@ function badgeBox(r, title) {
 function wireBadgeBox(r) {
   const box = $("#badgebox");
   if (!box) return;
-  let style = "card", format = "html";
+  let style = r.ach_rank != null ? "rank" : "card", format = "html";
   const update = () => {
-    const q = style === "small" ? "" : style === "card" ? "?style=card" : "?style=card&theme=dark";
+    const q = { small: "", card: "?style=card", "card-dark": "?style=card&theme=dark",
+                rank: "?style=rank", "rank-dark": "?style=rank&theme=dark" }[style];
     const img = `https://hackergit.org/badge/${r.repo}.svg${q}`;
     const href = $("#badge-hn").checked ? `https://news.ycombinator.com/item?id=${r.top_id}` : `https://hackergit.org/r/${r.repo}`;
     const size = style === "small" ? 'height="20"' : 'width="250" height="55"';
@@ -626,7 +646,7 @@ function wireBadgeBox(r) {
     $("#badge-center-wrap").hidden = format !== "html";
     $("#badge-md").textContent = code;
     $("#badge-preview").innerHTML = `<img src="/badge/${esc(r.repo)}.svg${q}" alt="Hacker News badge"${style === "small" ? ' height="20"' : ""}>`;
-    $("#badge-preview").classList.toggle("darkbg", style === "card-dark");
+    $("#badge-preview").classList.toggle("darkbg", style.endsWith("-dark"));
   };
   box.querySelectorAll("[data-bs]").forEach(b => b.onclick = () => {
     style = b.dataset.bs;
