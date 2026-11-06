@@ -80,6 +80,9 @@
   .item { display: grid; grid-template-columns: 40px 1fr; gap: 6px; padding: 14px 0; border-bottom: 1px solid var(--line); }
   .rank { color: var(--muted); text-align: right; padding-right: 8px; font-variant-numeric: tabular-nums; padding-top: 1px; }
   .head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .av { border-radius: 6px; background: var(--bg3); flex: none; object-fit: cover; }
+  .repo .av { vertical-align: -4px; margin-right: 8px; }
+  .repohead .av { border-radius: 9px; }
   .repo { font-size: 16px; font-weight: 600; color: var(--link); word-break: break-word; }
   .repo:hover { text-decoration: underline; }
   .repo .own { font-weight: 400; }
@@ -406,9 +409,13 @@ function showPage(s, page, d, token) {
   };
 }
 
+// Owner avatars load straight from GitHub in the browser (works for users and orgs); hidden if they fail.
+function avatar(owner, size) {
+  return `<img class="av" src="https://github.com/${encodeURIComponent(owner)}.png?size=${size * 2}" width="${size}" height="${size}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.style.visibility='hidden'">`;
+}
 function repoName(full, href) {
   const [o, n] = full.split("/");
-  return `<a class="repo mono" href="${href}"><span class="own">${esc(o)} / </span>${esc(n)}</a>`;
+  return `<a class="repo mono" href="${href}">${avatar(o, 20)}<span class="own">${esc(o)} / </span>${esc(n)}</a>`;
 }
 function ghMeta(r) {
   const bits = [];
@@ -498,7 +505,7 @@ async function renderRepo(key) {
   view.innerHTML = `<div class="page">
     <div class="crumb"><a href="/">HackerGit</a> / <a href="/?q=owner:${encodeURIComponent(r.owner)}">${esc(r.owner)}</a></div>
     <div class="repohead">
-      <h1 class="mono">${esc(r.repo)}</h1>
+      ${avatar(r.owner, 40)}<h1 class="mono">${esc(r.repo)}</h1>
       <a class="chip" href="https://github.com/${esc(r.repo)}" target="_blank" rel="noopener">GitHub ↗</a>
     </div>
     ${r.descr ? `<p class="descr" style="font-size:15px;margin:4px 0 0">${esc(r.descr)}</p>` : ""}
