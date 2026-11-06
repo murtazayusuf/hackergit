@@ -108,17 +108,20 @@ Point an `A` record for `hackergit.org` (and `www`) at the server's IP.
 
 Show how your repo did on Hacker News. Replace `owner/repo` with yours:
 
-```markdown
-[![Hacker News](https://hackergit.org/badge/owner/repo.svg)](https://hackergit.org/r/owner/repo)
+```html
+<a href="https://hackergit.org/r/owner/repo"><img src="https://hackergit.org/badge/owner/repo.svg?style=card" alt="Hacker News" width="250" height="55"></a>
 ```
+
+<a href="https://hackergit.org/r/karpathy/nanoGPT"><img src="https://hackergit.org/badge/karpathy/nanoGPT.svg?style=card" alt="Hacker News" width="250" height="55"></a>
+
+The card is 250×55, the same size as Trendshift-style README cards, and shows points, comments and number of HN posts.
+Add `&theme=dark` for dark READMEs.
+
+Prefer a small shields.io-style badge? Drop `?style=card`:
 
 [![Hacker News](https://hackergit.org/badge/karpathy/nanoGPT.svg)](https://hackergit.org/r/karpathy/nanoGPT)
 
-Options: `?show=comments` or `?show=posts` for other numbers, `?label=HN` for a shorter label.
-
-There's also a larger card with points, comments and posts (`?style=card`, plus `&theme=dark` for dark READMEs):
-
-[![Hacker News](https://hackergit.org/badge/karpathy/nanoGPT.svg?style=card)](https://hackergit.org/r/karpathy/nanoGPT)
+Options for the small badge: `?show=comments` or `?show=posts` for other numbers, `?label=HN` for a shorter label.
 
 Prefer to send readers straight to Hacker News? Point the link at your HN post instead
 (`https://news.ycombinator.com/item?id=...`); the badge picker on each repo page has a checkbox for this.

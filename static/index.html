@@ -488,7 +488,7 @@ function badgeBox(r, title) {
   return `<div class="badgebox" id="badgebox">
     <div class="badgehead"><b>${title}</b>
       <div class="seg" role="group" aria-label="Badge style">
-        <button type="button" data-bs="small" class="on">Small</button><button type="button" data-bs="card">Card</button><button type="button" data-bs="card-dark">Card (dark)</button>
+        <button type="button" data-bs="card" class="on">Card</button><button type="button" data-bs="small">Small</button><button type="button" data-bs="card-dark">Card (dark)</button>
       </div>
     </div>
     <div class="badgepreview" id="badge-preview"></div>
@@ -500,7 +500,7 @@ function badgeBox(r, title) {
 function wireBadgeBox(r) {
   const box = $("#badgebox");
   if (!box) return;
-  let style = "small";
+  let style = "card";
   const update = () => {
     const q = style === "small" ? "" : style === "card" ? "?style=card" : "?style=card&theme=dark";
     const img = `https://hackergit.org/badge/${r.repo}.svg${q}`;
@@ -597,12 +597,13 @@ async function renderAbout() {
       <li><code>by:username</code> shows repos a given HN user posted.</li>
       <li><code>owner:rust-lang</code> limits results to one GitHub user or org.</li>
       <li><code>lang:zig</code> filters by main language (when star data is enabled).</li>
-      <li>Under <i>Repos</i>, "Poster karma" is the karma of whoever posted the highest-scoring post. Use <i>HN posts</i> to filter each post by its own poster.</li>
+      <li>"Poster karma" is the karma of whoever posted the repo's highest-scoring post.</li>
     </ul>
     <h2>Badge for your README</h2>
     <p>If your repo was on Hacker News, show it off. Open your repo's page here (search for it) and copy the badge, or use:</p>
-    <p><code>[![Hacker News](https://hackergit.org/badge/owner/repo.svg)](https://hackergit.org/r/owner/repo)</code></p>
-    <p><img src="/badge/karpathy/nanoGPT.svg" alt="Example Hacker News badge" height="20"> &nbsp;Add <code>?show=comments</code> or <code>?show=posts</code> for other numbers.</p>
+    <p><code>[![Hacker News](https://hackergit.org/badge/owner/repo.svg?style=card)](https://hackergit.org/r/owner/repo)</code></p>
+    <p><img src="/badge/karpathy/nanoGPT.svg?style=card" alt="Example Hacker News badge" width="250" height="55"></p>
+    <p>It's 250×55, the same size as Trendshift-style cards. Prefer a small shields.io-style badge? Drop <code>?style=card</code>. More options on the <a href="/badges">badge page</a>.</p>
     <h2>Open source</h2>
     <p>HackerGit's code is on GitHub at <a href="https://github.com/murtazayusuf/hackergit">murtazayusuf/hackergit</a>.
       Found a bug, or want a feature or a different way to slice the data? <a href="https://github.com/murtazayusuf/hackergit/issues">Open an issue</a>
