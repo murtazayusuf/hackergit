@@ -55,7 +55,7 @@ systemctl enable --quiet hackergit caddy
 systemctl restart hackergit
 systemctl reload caddy 2>/dev/null || systemctl restart caddy
 
-for _ in $(seq 1 30); do
+for _ in $(seq 1 120); do
   if curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
     echo "HackerGit is running."
     exit 0

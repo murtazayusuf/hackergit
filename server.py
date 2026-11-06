@@ -58,6 +58,9 @@ SORTS_POSTS = {
 }
 
 
+KINDS = {"show": "Show HN", "launch": "Launch HN", "ask": "Ask HN", "tell": "Tell HN", "other": ""}
+
+
 def fts_query(text):
     words = re.findall(r"[\w.\-/+#]+", text, re.UNICODE)
     words = [w.replace('"', "") for w in words if w.strip(".-/")]
@@ -102,6 +105,10 @@ def search(p):
         if p.get(k) and p[k][0]:
             f[k] = p[k][0]
     match = fts_query(text)
+    kind = (p.get("type") or [""])[0]
+    if kind not in KINDS:
+        kind = ""
+    show = view != "posts" and kind == "show"  # rank and display repos by their best Show HN post
 
     where, args = [], []
     if view == "posts":
@@ -118,6 +125,8 @@ def search(p):
             args.append(match)
         cols = {"points": "r.points", "comments": "r.comments", "karma": "r.karma",
                 "stars": "r.stars", "time_from": "r.last_time", "time_to": "r.first_time"}
+        if show:
+            cols.update(points="r.show_points", comments="r.show_comments", karma="coalesce(r.show_karma, 0)")
 
     for key, col, op in (("min_points", cols["points"], ">="), ("min_comments", cols["comments"], ">="),
                          ("min_karma", cols["karma"], ">="), ("max_karma", cols["karma"], "<="),
@@ -146,6 +155,17 @@ def search(p):
     if f.get("lang"):
         where.append(f"lower({'g.lang' if view == 'posts' else 'r.lang'}) = ?")
         args.append(f["lang"].lower())
+    if kind:
+        if view == "posts":
+            if kind == "other":
+                where.append(" AND ".join(f"s.title NOT LIKE '{x}%'" for x in KINDS.values() if x))
+            else:
+                where.append("s.title LIKE ?")
+                args.append(KINDS[kind] + "%")
+        else:
+            where.append("r.kinds = ','" if kind == "other" else "r.kinds LIKE ?")
+            if kind != "other":
+                args.append(f"%,{kind},%")
 
     w = ("WHERE " + " AND ".join(where)) if where else ""
     con = db()
@@ -159,9 +179,31 @@ def search(p):
                 ORDER BY {order}, s.id DESC LIMIT ? OFFSET ?""", args + [PAGE_SIZE, page * PAGE_SIZE]).fetchall()
     else:
         order = SORTS_REPOS.get(sort, SORTS_REPOS["points"])
+        order_args = []
+        if show:
+            order = {"points": "r.show_points DESC", "comments": "r.show_comments DESC",
+                     "karma": "coalesce(r.show_karma, 0) DESC"}.get(sort, order)
+        elif kind in ("launch", "ask", "tell") and sort in ("points", "comments"):
+            # small sets: rank by the matching post itself
+            order = (f"(SELECT max({sort}) FROM stories s WHERE lower(s.repo) = r.key AND s.title LIKE ?) DESC")
+            order_args = [KINDS[kind] + "%"]
         total = con.execute(f"SELECT count(*) FROM repos r {w}", args).fetchone()[0]
         rows = con.execute(f"""SELECT r.* FROM repos r {w} ORDER BY {order}, r.key
-                LIMIT ? OFFSET ?""", args + [PAGE_SIZE, page * PAGE_SIZE]).fetchall()
+                LIMIT ? OFFSET ?""", args + order_args + [PAGE_SIZE, page * PAGE_SIZE]).fetchall()
+        if kind in ("launch", "ask", "tell"):  # show the matching post, not the repo's overall top post
+            out = []
+            for x in rows:
+                m = con.execute("""SELECT s.id, s.title, s.points, s.comments, s.author, coalesce(u.karma, 0) AS karma
+                        FROM stories s LEFT JOIN users u ON u.name = s.author
+                        WHERE lower(s.repo) = ? AND s.title LIKE ? ORDER BY s.points DESC LIMIT 1""",
+                                (x["key"], KINDS[kind] + "%")).fetchone()
+                out.append({**dict(x), "top_id": m["id"], "top_title": m["title"], "points": m["points"],
+                            "comments": m["comments"], "top_author": m["author"], "karma": m["karma"]} if m else dict(x))
+            rows = out
+        if show:  # show the Show HN post instead of the repo's overall top post
+            rows = [{**dict(x), "top_id": x["show_id"], "top_title": x["show_title"], "points": x["show_points"],
+                     "comments": x["show_comments"], "top_author": x["show_author"], "karma": x["show_karma"]}
+                    for x in rows]
     return {"view": view, "total": total, "page": page, "page_size": PAGE_SIZE,
             "results": [dict(r) for r in rows]}
 

@@ -78,7 +78,10 @@ CREATE TABLE IF NOT EXISTS repos (
   subs INTEGER, points INTEGER, total_points INTEGER, comments INTEGER,
   first_time INTEGER, last_time INTEGER,
   top_id INTEGER, top_title TEXT, top_author TEXT, karma INTEGER, max_karma INTEGER,
-  stars INTEGER, lang TEXT, descr TEXT
+  stars INTEGER, lang TEXT, descr TEXT,
+  kinds TEXT,                      -- e.g. ",show,ask," : HN post types this repo has
+  show_id INTEGER, show_title TEXT, show_points INTEGER, show_comments INTEGER,  -- best Show HN post
+  show_author TEXT, show_karma INTEGER
 );
 CREATE INDEX IF NOT EXISTS repos_points ON repos(points);
 CREATE INDEX IF NOT EXISTS repos_comments ON repos(comments);
@@ -86,6 +89,7 @@ CREATE INDEX IF NOT EXISTS repos_karma ON repos(karma);
 CREATE INDEX IF NOT EXISTS repos_last ON repos(last_time);
 CREATE INDEX IF NOT EXISTS repos_stars ON repos(stars);
 CREATE INDEX IF NOT EXISTS repos_subs ON repos(subs);
+CREATE INDEX IF NOT EXISTS repos_show_points ON repos(show_points);
 CREATE VIRTUAL TABLE IF NOT EXISTS repos_fts USING fts5(key UNINDEXED, repo, titles, descr, tokenize='unicode61 tokenchars ''-_''');
 CREATE VIRTUAL TABLE IF NOT EXISTS stories_fts USING fts5(title, repo, content='stories', content_rowid='id', tokenize='unicode61 tokenchars ''-_''');
 CREATE TRIGGER IF NOT EXISTS stories_ai AFTER INSERT ON stories BEGIN
@@ -107,7 +111,14 @@ def connect(readonly=False):
         con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, check_same_thread=False, timeout=30)
     else:
         con = sqlite3.connect(DB_PATH, timeout=60)
+        cols = {r[1] for r in con.execute("PRAGMA table_info(repos)")}
+        migrate = bool(cols) and "kinds" not in cols
+        if migrate:
+            con.execute("DROP TABLE repos")
         con.executescript(SCHEMA)
+        if migrate:
+            con.row_factory = sqlite3.Row
+            rebuild(con)
     con.row_factory = sqlite3.Row
     return con
 
@@ -330,20 +341,31 @@ def rebuild(con):
     con.execute("DELETE FROM repos")
     con.execute("""
         INSERT INTO repos(key, repo, owner, name, subs, points, total_points, comments, first_time, last_time,
-                          top_id, top_title, top_author, karma, max_karma, stars, lang, descr)
+                          top_id, top_title, top_author, karma, max_karma, stars, lang, descr,
+                          kinds, show_id, show_title, show_points, show_comments, show_author, show_karma)
         WITH s AS (
           SELECT st.*, lower(st.repo) AS k, coalesce(u.karma, 0) AS karma,
                  row_number() OVER (PARTITION BY lower(st.repo) ORDER BY st.points DESC, st.time) AS rn
           FROM stories st LEFT JOIN users u ON u.name = st.author
         ), agg AS (
           SELECT k, count(*) subs, max(points) points, sum(points) total_points, sum(comments) comments,
-                 min(time) first_time, max(time) last_time, max(karma) max_karma
+                 min(time) first_time, max(time) last_time, max(karma) max_karma,
+                 ',' || (CASE WHEN max(title LIKE 'Show HN%') THEN 'show,' ELSE '' END)
+                     || (CASE WHEN max(title LIKE 'Launch HN%') THEN 'launch,' ELSE '' END)
+                     || (CASE WHEN max(title LIKE 'Ask HN%') THEN 'ask,' ELSE '' END)
+                     || (CASE WHEN max(title LIKE 'Tell HN%') THEN 'tell,' ELSE '' END) AS kinds
           FROM s GROUP BY k
+        ), sh AS (
+          SELECT k, id, title, points, comments, author, karma,
+                 row_number() OVER (PARTITION BY k ORDER BY points DESC, time) AS rn
+          FROM s WHERE title LIKE 'Show HN%'
         )
         SELECT a.k, t.repo, substr(t.repo, 1, instr(t.repo, '/') - 1), substr(t.repo, instr(t.repo, '/') + 1),
                a.subs, a.points, a.total_points, a.comments, a.first_time, a.last_time,
-               t.id, t.title, t.author, t.karma, a.max_karma, g.stars, g.lang, g.descr
+               t.id, t.title, t.author, t.karma, a.max_karma, g.stars, g.lang, g.descr,
+               a.kinds, sh.id, sh.title, sh.points, sh.comments, sh.author, sh.karma
         FROM agg a JOIN s t ON t.k = a.k AND t.rn = 1
+        LEFT JOIN sh ON sh.k = a.k AND sh.rn = 1
         LEFT JOIN github g ON g.key = a.k
     """)
     con.execute("DELETE FROM repos_fts")
