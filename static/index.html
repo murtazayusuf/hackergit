@@ -310,7 +310,7 @@ $("#theme").onclick = () => {
 };
 
 // ---------------------------------------------------------------- state <-> URL
-const DEFAULTS = { q: "", view: "repos", type: "", sort: "points", min_points: "", min_comments: "", min_karma: "", max_karma: "", min_stars: "", from: "", to: "", lang: "" };
+const DEFAULTS = { q: "", readme: "", view: "repos", type: "", sort: "points", min_points: "", min_comments: "", min_karma: "", max_karma: "", min_stars: "", from: "", to: "", lang: "" };
 function readState() {
   const p = new URLSearchParams(location.search), s = { ...DEFAULTS };
   for (const k in DEFAULTS) if (p.has(k)) s[k] = p.get(k);
@@ -390,6 +390,7 @@ async function renderList() {
         ${langs.length ? select("lang", [["", "Any"], ...langs.map(l => [l, l])], s.lang, "Language") : ""}
         ${select("from", [["", "Any"], ...years], s.from, "From")}
         ${select("to", [["", "Any"], ...years], s.to, "To")}
+        ${s.q ? `<label class="badgelink" title="Also match words in each repo's README"><input type="checkbox" id="readme-toggle"${s.readme === "0" ? "" : " checked"}> Include READMEs</label>` : ""}
         ${dirty ? `<button class="reset" id="reset">Clear filters</button>` : ""}
       </div>
     </section>
@@ -409,6 +410,7 @@ async function renderList() {
     go("/?" + stateQuery(n));
   });
   const r = $("#reset"); if (r) r.onclick = () => go("/?" + stateQuery({ ...DEFAULTS, q: s.q }));
+  const rt = $("#readme-toggle"); if (rt) rt.onchange = () => go("/?" + stateQuery({ ...s, readme: rt.checked ? "" : "0" }));
   showPage(s, 0, first, token);
 }
 
@@ -711,6 +713,8 @@ async function renderAbout() {
       <li><b>Karma</b> comes from the <a href="https://github.com/HackerNews/API">official HN API</a>, one lookup per poster,
         refreshed weekly.</li>
       <li><b>Stars, language and descriptions</b> come from the GitHub API, when enabled.</li>
+      <li><b>READMEs</b> are indexed too (cleaned of badges, links and code), so search finds repos by what they do,
+        not just by their HN title. Untick "Include READMEs" to search names and titles only.</li>
       <li>New posts are picked up every few minutes, and points and comment counts keep updating for a few days after a post.</li>
       <li><b>Rankings</b>: Hacker News doesn't keep a history of where posts ranked, so HackerGit records the front page and the
         Show HN page every 2 minutes${st && st.ranks_since ? `, starting ${date(st.ranks_since)}` : ""}. Repo pages show each post's best

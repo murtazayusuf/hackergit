@@ -121,8 +121,14 @@ def search(p):
     else:
         t = "r"
         if match:
-            where.append("r.key IN (SELECT key FROM repos_fts WHERE repos_fts MATCH ?)")
-            args.append(match)
+            if (p.get("readme") or ["1"])[0] == "0":
+                where.append("r.key IN (SELECT key FROM repos_fts WHERE repos_fts MATCH ?)")
+                args.append(match)
+            else:  # also match README text
+                where.append("""(r.key IN (SELECT key FROM repos_fts WHERE repos_fts MATCH ?)
+                    OR r.key IN (SELECT m.key FROM readmes m WHERE m.rowid IN
+                                 (SELECT rowid FROM readme_fts WHERE readme_fts MATCH ?)))""")
+                args += [match, match]
         cols = {"points": "r.points", "comments": "r.comments", "karma": "r.karma",
                 "stars": "r.stars", "time_from": "r.last_time", "time_to": "r.first_time"}
         if show:

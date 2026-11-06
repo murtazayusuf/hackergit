@@ -16,6 +16,7 @@ import re
 import sqlite3
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -72,6 +73,19 @@ CREATE TABLE IF NOT EXISTS github (
   key TEXT PRIMARY KEY, stars INTEGER, lang TEXT, descr TEXT, archived INTEGER, missing INTEGER DEFAULT 0, fetched INTEGER
 );
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
+-- Cleaned README text per repo, with its own search index kept up to date incrementally (never rebuilt).
+CREATE TABLE IF NOT EXISTS readmes (key TEXT PRIMARY KEY, text TEXT, fetched INTEGER, missing INTEGER DEFAULT 0);
+CREATE VIRTUAL TABLE IF NOT EXISTS readme_fts USING fts5(text, content='readmes', content_rowid='rowid', tokenize='unicode61 tokenchars ''-_''');
+CREATE TRIGGER IF NOT EXISTS readmes_ai AFTER INSERT ON readmes BEGIN
+  INSERT INTO readme_fts(rowid, text) VALUES (new.rowid, new.text);
+END;
+CREATE TRIGGER IF NOT EXISTS readmes_ad AFTER DELETE ON readmes BEGIN
+  INSERT INTO readme_fts(readme_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
+END;
+CREATE TRIGGER IF NOT EXISTS readmes_au AFTER UPDATE OF text ON readmes BEGIN
+  INSERT INTO readme_fts(readme_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
+  INSERT INTO readme_fts(rowid, text) VALUES (new.rowid, new.text);
+END;
 -- Live HN rankings, recorded by polling the official API (HN keeps no history of positions).
 -- list: 'front' (front page, /v0/topstories) or 'show' (Show HN page, /v0/showstories).
 CREATE TABLE IF NOT EXISTS ranks (
@@ -373,6 +387,115 @@ def refresh_github(con, limit=25000, stale_days=14):
     return done
 
 
+# ---------------------------------------------------------------- READMEs
+
+README_NAMES = ["README.md", "readme.md", "Readme.md", "README.markdown", "README.rst", "README.txt", "README"]
+README_MAX = 16000  # characters of cleaned text kept per repo
+
+
+def clean_readme(text):
+    """Keep the prose that describes a project; drop badges, images, HTML, URLs and code blocks."""
+    if not text:
+        return ""
+    t = text.replace("\r", "")
+    t = re.sub(r"<!--.*?-->", " ", t, flags=re.S)
+    t = re.sub(r"^(```|~~~).*?^\1", " ", t, flags=re.S | re.M)      # fenced code blocks
+    t = re.sub(r"\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)", " ", t)            # linked badges
+    t = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", t)                        # images and badges
+    t = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", t)                      # [text](url) -> text
+    t = re.sub(r"^\[[^\]]+\]:\s*\S+.*$", " ", t, flags=re.M)            # reference-style link definitions
+    t = re.sub(r"<[^>]+>", " ", t)                                       # HTML tags
+    t = re.sub(r"https?://\S+", " ", t)                                  # bare URLs
+    t = re.sub(r"`([^`]*)`", r"\1", t)
+    t = re.sub(r"[#*_>|=~-]{2,}", " ", t)                                # markdown/rst decoration
+    t = re.sub(r"&[a-z]+;|&#\d+;", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t[:README_MAX]
+
+
+def _readmes_graphql(chunk):
+    """{key: text or None} for a batch of repos, via GitHub GraphQL (needs GITHUB_TOKEN)."""
+    parts = []
+    for j, k in enumerate(chunk):
+        owner, name = k.split("/", 1)
+        objs = " ".join(f'f{i}: object(expression: {json.dumps("HEAD:" + n)}) {{ ... on Blob {{ text isBinary }} }}'
+                        for i, n in enumerate(README_NAMES))
+        parts.append(f"r{j}: repository(owner: {json.dumps(owner)}, name: {json.dumps(name)}) {{ {objs} }}")
+    d = http_json("https://api.github.com/graphql", data={"query": "query {" + "\n".join(parts) + "}"},
+                  headers={"Authorization": f"bearer {GITHUB_TOKEN}"}, retries=3, timeout=90)
+    data = d.get("data")
+    if not data:
+        raise RuntimeError("; ".join(x.get("message", "") for x in d.get("errors") or []) or "no data returned")
+    out = {}
+    for j, k in enumerate(chunk):
+        repo = data.get(f"r{j}") or {}
+        text = None
+        for i in range(len(README_NAMES)):
+            b = repo.get(f"f{i}")
+            if b and not b.get("isBinary") and b.get("text"):
+                text = b["text"]
+                break
+        out[k] = text
+    return out
+
+
+def _readme_raw(key):
+    """README text via raw.githubusercontent.com (no token needed). None on network errors."""
+    for n in README_NAMES:
+        try:
+            req = urllib.request.Request(f"https://raw.githubusercontent.com/{key}/HEAD/{n}", headers={"User-Agent": UA})
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return r.read(400_000).decode("utf-8", "replace")
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                return None
+        except Exception:
+            return None
+    return ""
+
+
+def refresh_readmes(con, limit=3000, stale_days=30):
+    """Fetch READMEs for repos that don't have one yet (best repos first), then refresh old ones."""
+    now = int(time.time())
+    keys = [r[0] for r in con.execute("""
+        SELECT r.key FROM repos r LEFT JOIN readmes m ON m.key = r.key
+        WHERE m.key IS NULL OR m.fetched < ?
+        ORDER BY m.key IS NOT NULL, r.points DESC LIMIT ?""", (now - stale_days * 86400, limit))]
+    if not keys:
+        return 0
+    done, err = 0, None
+    batch = 20 if GITHUB_TOKEN else 8
+    for i in range(0, len(keys), batch):
+        chunk = keys[i:i + batch]
+        got = None
+        if GITHUB_TOKEN:
+            try:
+                got = _readmes_graphql(chunk)
+            except Exception as e:  # e.g. GitHub timing out on huge READMEs: fall back to raw files for this batch
+                err = str(e)[:200]
+                log("readmes: GraphQL batch failed, using raw files:", err)
+        if got is None:
+            with ThreadPoolExecutor(8) as ex:
+                got = dict(zip(chunk, ex.map(_readme_raw, chunk)))
+            got = {k: v for k, v in got.items() if v is not None}  # network errors: try again later
+            if not got and len(chunk) > 1:
+                err = err or "network errors"
+                break
+        rows = [(k, clean_readme(v or ""), now, 0 if v else 1) for k, v in got.items()]
+        con.executemany("""INSERT INTO readmes(key, text, fetched, missing) VALUES (?,?,?,?)
+            ON CONFLICT(key) DO UPDATE SET text = excluded.text, fetched = excluded.fetched, missing = excluded.missing""", rows)
+        con.commit()
+        done += len(rows)
+        if GITHUB_TOKEN:
+            time.sleep(0.5)
+    have = con.execute("SELECT count(*) FROM readmes WHERE missing = 0").fetchone()[0]
+    meta_set(con, "readme_status", f"error: {err}" if err and not done else
+             f"ok: {done} fetched at {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())}, {have:,} indexed")
+    con.commit()
+    log(f"readmes: fetched {done}, {have:,} indexed")
+    return done
+
+
 # ---------------------------------------------------------------- derived index
 
 def rebuild(con):
@@ -428,6 +551,7 @@ def update(con, karma_limit=None):
     rebuild(con)
     if refresh_github(con):
         rebuild(con)
+    refresh_readmes(con)  # incremental index: no rebuild needed
     meta_set(con, "last_update", int(time.time()))
     con.commit()
 
@@ -443,6 +567,8 @@ def stats(con):
         "last": q("SELECT max(time) FROM stories"),
         "last_update": int(meta_get(con, "last_update", 0) or 0),
         "github_status": meta_get(con, "github_status", "not run yet"),
+        "readme_status": meta_get(con, "readme_status", "not run yet"),
+        "with_readme": con.execute("SELECT count(*) FROM readmes WHERE missing = 0").fetchone()[0],
         "version": meta_get(con, "last_rebuild", "0"),
         "ranks_since": int(meta_get(con, "ranks_since", 0) or 0),
     }
@@ -463,6 +589,8 @@ def main():
     elif cmd == "karma":
         refresh_karma(con)
         rebuild(con)
+    elif cmd == "readmes":
+        refresh_readmes(con, limit=int(sys.argv[2]) if len(sys.argv) > 2 else 10 ** 9)
     elif cmd == "github":
         refresh_github(con, limit=10 ** 9)
         rebuild(con)
