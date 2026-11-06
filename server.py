@@ -295,7 +295,7 @@ def sitemap_urls(urls):
 
 def sitemap_file(name):
     if name == "pages.xml":
-        return sitemap_urls([(f"{SITE}/", day(time.time())), (f"{SITE}/about", None), (f"{SITE}/badges", None)])
+        return sitemap_urls([(f"{SITE}/", day(time.time())), (f"{SITE}/show-hn", day(time.time())), (f"{SITE}/badges", None), (f"{SITE}/about", None)])
     m = re.fullmatch(r"repos-(\d+)\.xml", name)
     if not m:
         return None
@@ -309,33 +309,137 @@ def sitemap_file(name):
 _index_html = [None]
 
 
+def _repo_items(rows, title_key="top_title", id_key="top_id", pts_key="points", com_key="comments"):
+    """Plain HTML list of repos, linked to their HackerGit pages (for crawlers and no-JS visitors)."""
+    out = []
+    for i, r in enumerate(rows, 1):
+        out.append(f'<li class="item"><div class="rank">{i}.</div><div>'
+                   f'<a class="repo mono" href="/r/{xml_esc(r["repo"])}">{xml_esc(r["repo"])}</a>'
+                   f'<div class="title"><a href="https://news.ycombinator.com/item?id={r[id_key]}">{xml_esc(r[title_key])}</a></div>'
+                   + (f'<div class="descr">{xml_esc(r["descr"])}</div>' if r["descr"] else "")
+                   + f'<div class="meta"><span class="pts">{r[pts_key]:,} points</span><span>{r[com_key]:,} comments</span>'
+                   + (f'<span>{r["stars"]:,} GitHub stars</span>' if r["stars"] is not None else "")
+                   + '</div></div></li>')
+    return '<ol class="list">' + "".join(out) + "</ol>"
+
+
+BADGE_TEXT = """<p>Add a <b>Hacker News badge</b> to your GitHub README to show how your repo did on HN: points, comments
+and how many times it was posted. It's free, updates by itself, and comes as a 250×55 card (the same size as
+Trendshift and other README cards) or a small shields.io-style badge.</p>"""
+
+
+def page_content(path):
+    """(status, title, description, canonical, body_html, json_ld) for a page path."""
+    con = db()
+    st = hg.stats(con)
+    repos_n, posts_n = f"{st['repos']:,}", f"{st['stories']:,}"
+    site_ld = {"@context": "https://schema.org", "@type": "WebSite", "name": "HackerGit", "url": SITE + "/",
+               "description": "Every GitHub repo shared on Hacker News, searchable by points, comments, stars and poster karma.",
+               "potentialAction": {"@type": "SearchAction", "target": SITE + "/?q={search_term_string}",
+                                   "query-input": "required name=search_term_string"}}
+    if path in ("/", ""):
+        rows = con.execute("SELECT * FROM repos ORDER BY points DESC LIMIT 30").fetchall()
+        body = (f'<section class="hero"><h1>Every GitHub repo Hacker News has shared.</h1>'
+                f'<p>{repos_n} GitHub repositories from {posts_n} Hacker News posts since 2008. Search them and sort by '
+                f'points, comments, GitHub stars, or the karma of whoever posted them. Browse the '
+                f'<a href="/show-hn">best Show HN projects</a> or get a <a href="/badges">Hacker News badge</a> for your README.</p></section>'
+                f'<h2 class="sect">Top GitHub repos on Hacker News</h2>' + _repo_items(rows))
+        return (200, "HackerGit: every GitHub repo shared on Hacker News",
+                f"Search {repos_n} GitHub repos shared on Hacker News. Sort by points, comments, stars and poster karma, "
+                "browse the best Show HN projects, and add a Hacker News badge to your README.",
+                SITE + "/", body, site_ld)
+    if path == "/show-hn":
+        rows = con.execute("SELECT * FROM repos WHERE show_points IS NOT NULL ORDER BY show_points DESC LIMIT 50").fetchall()
+        n = con.execute("SELECT count(*) FROM repos WHERE show_points IS NOT NULL").fetchone()[0]
+        body = (f'<section class="hero"><h1>Best Show HN projects on GitHub</h1>'
+                f'<p>{n:,} open source projects launched with a Show HN post, ranked by points. Filter by comments, '
+                f'stars, language or the poster\'s karma to find hidden gems from first-time posters.</p></section>'
+                + _repo_items(rows, "show_title", "show_id", "show_points", "show_comments"))
+        return (200, "Best Show HN projects on GitHub - HackerGit",
+                f"The best Show HN projects: {n:,} open source GitHub repos launched on Hacker News, ranked by points "
+                "and comments. Find hidden gems from first-time posters.", SITE + "/show-hn", body, site_ld)
+    if path == "/badges":
+        body = (f'<div class="page about"><h1>Hacker News badge for your GitHub README</h1>{BADGE_TEXT}'
+                '<p><img src="/badge/karpathy/nanoGPT.svg?style=card" alt="Hacker News badge example" width="250" height="55"></p>'
+                '<p><code>&lt;a href="https://hackergit.org/r/owner/repo"&gt;&lt;img src="https://hackergit.org/badge/owner/repo.svg?style=card" '
+                'alt="Hacker News" width="250" height="55"&gt;&lt;/a&gt;</code></p>'
+                '<p>Also works as Markdown, in dark mode, or linking straight to your HN post. Search for your repo above to get yours.</p></div>')
+        return (200, "Hacker News badge for your GitHub README (Show HN badge) - HackerGit",
+                "Free Hacker News badge for your GitHub README: show your HN points, comments and posts. Card or "
+                "shields.io-style, HTML or Markdown, light or dark, updates automatically.", SITE + "/badges", body, None)
+    if path == "/about":
+        body = (f'<div class="page about"><h1>About HackerGit</h1><p>HackerGit collects every GitHub repository shared on '
+                f'Hacker News ({repos_n} repos from {posts_n} posts) so you can search them and sort by points, comments, '
+                'stars and poster karma. Data comes from the Algolia HN Search API, the official Hacker News API and the '
+                'GitHub API, updated every 10 minutes. The code is open source on '
+                '<a href="https://github.com/murtazayusuf/hackergit">GitHub</a>.</p></div>')
+        return (200, "About HackerGit: GitHub repos on Hacker News",
+                "How HackerGit collects every GitHub repo shared on Hacker News, where the data comes from, and how to "
+                "contribute. Open source.", SITE + "/about", body, None)
+    m = re.fullmatch(r"/r/([^/]+/[^/]+)/?", path)
+    if m:
+        r = con.execute("SELECT * FROM repos WHERE key = ?", (m.group(1).lower(),)).fetchone()
+        if not r:
+            return (404, f"{m.group(1)} - HackerGit", "This repo hasn't been shared on Hacker News yet.",
+                    f"{SITE}/r/{m.group(1)}", f'<div class="page"><h1 class="mono">{xml_esc(m.group(1))}</h1>'
+                    "<p>This repo hasn't been shared on Hacker News yet.</p></div>", None)
+        posts = con.execute("SELECT id, title, points, comments, author, time FROM stories WHERE lower(repo) = ? "
+                            "ORDER BY points DESC LIMIT 50", (r["key"],)).fetchall()
+        url = f"{SITE}/r/{r['repo']}"
+        desc = (f"{r['repo']} on Hacker News: {r['points']:,} points and {r['comments']:,} comments across {r['subs']} "
+                f"post{'s' if r['subs'] != 1 else ''}. Top post: “{r['top_title']}”."
+                + (f" {r['descr']}" if r["descr"] else ""))[:300]
+        items = "".join(f'<li><a href="https://news.ycombinator.com/item?id={p["id"]}">{xml_esc(p["title"])}</a> '
+                        f'({p["points"]:,} points, {p["comments"]:,} comments, by {xml_esc(p["author"])}, {day(p["time"])})</li>'
+                        for p in posts)
+        body = (f'<div class="page"><h1 class="mono">{xml_esc(r["repo"])}</h1>'
+                + (f'<p class="descr">{xml_esc(r["descr"])}</p>' if r["descr"] else "")
+                + f'<p>{r["points"]:,} best points · {r["comments"]:,} comments · {r["subs"]} Hacker News post{"s" if r["subs"] != 1 else ""}'
+                + (f' · {r["stars"]:,} GitHub stars' if r["stars"] is not None else "")
+                + f' · <a href="https://github.com/{xml_esc(r["repo"])}">View on GitHub</a></p>'
+                f'<h2 class="sect">Hacker News discussions</h2><ul>{items}</ul></div>')
+        ld = {"@context": "https://schema.org", "@type": "SoftwareSourceCode", "name": r["name"],
+              "codeRepository": f"https://github.com/{r['repo']}", "url": url, "description": r["descr"] or r["top_title"],
+              "author": {"@type": "Person", "name": r["owner"]}, "programmingLanguage": r["lang"] or None,
+              "discussionUrl": f"https://news.ycombinator.com/item?id={r['top_id']}"}
+        return (200, f"{r['repo']} on Hacker News ({r['points']:,} points) - HackerGit", desc, url, body,
+                {k: v for k, v in ld.items() if v is not None})
+    m = re.fullmatch(r"/u/([^/]+)/?", path)
+    if m:
+        name = m.group(1)
+        return (200, f"GitHub repos posted to Hacker News by {name} - HackerGit",
+                f"Every GitHub repo {name} has shared on Hacker News, with points, comments and stars.",
+                f"{SITE}/u/{name}", f'<div class="page"><h1>{xml_esc(name)}</h1></div>', None)
+    return (404, "Page not found - HackerGit", "This page doesn't exist.", SITE + "/",
+            '<div class="page"><h1>Page not found</h1><p><a href="/">Back to HackerGit</a></p></div>', None)
+
+
+_index_html = [None]
+
+
 def page_html(path):
-    """The single-page app, with a real title and description for repo pages (for search engines and link previews)."""
+    """(status, html): the single-page app with real content, title, description and canonical for this page."""
     if _index_html[0] is None:
         with open(INDEX, encoding="utf-8") as fh:
             _index_html[0] = fh.read()
+    status, title, desc, canonical, body, ld = cached("page:" + path, lambda: page_content(path))
+    t, d, u = xml_esc(title), xml_esc(desc), xml_esc(canonical)
     html = _index_html[0]
-    m = re.fullmatch(r"/r/([^/]+/[^/]+)/?", path)
-    r = db().execute("SELECT * FROM repos WHERE key = ?", (m.group(1).lower(),)).fetchone() if m else None
-    if not r:
-        if path == "/about":
-            html = html.replace("<title>HackerGit</title>", "<title>About - HackerGit</title>", 1)
-        elif path == "/badges":
-            html = html.replace("<title>HackerGit</title>", "<title>Hacker News badge for your README - HackerGit</title>", 1)
-        return html
-    title = f"{r['repo']} on Hacker News - HackerGit"
-    desc = (f"{r['repo']}: {r['points']:,} points and {r['comments']:,} comments across {r['subs']} Hacker News "
-            f"post{'s' if r['subs'] != 1 else ''}. Top post: “{r['top_title']}”."
-            + (f" {r['descr']}" if r["descr"] else ""))[:300]
-    url = f"{SITE}/r/{r['repo']}"
-    t, d, u = xml_esc(title), xml_esc(desc), xml_esc(url)
     html = html.replace("<title>HackerGit</title>", f"<title>{t}</title>", 1)
-    html = re.sub(r'<meta name="description" content="[^"]*">', f'<meta name="description" content="{d}">', html, count=1)
-    html = re.sub(r'<meta property="og:title" content="[^"]*">', f'<meta property="og:title" content="{t}">', html, count=1)
-    html = re.sub(r'<meta property="og:description" content="[^"]*">', f'<meta property="og:description" content="{d}">', html, count=1)
-    html = html.replace('<link rel="canonical" href="https://hackergit.org/">', f'<link rel="canonical" href="{u}">', 1)
-    html = html.replace('<meta property="og:url" content="https://hackergit.org/">', f'<meta property="og:url" content="{u}">', 1)
-    return html
+    for pat, val in ((r'<meta name="description" content="[^"]*">', f'<meta name="description" content="{d}">'),
+                     (r'<meta property="og:title" content="[^"]*">', f'<meta property="og:title" content="{t}">'),
+                     (r'<meta property="og:description" content="[^"]*">', f'<meta property="og:description" content="{d}">'),
+                     (r'<meta name="twitter:title" content="[^"]*">', f'<meta name="twitter:title" content="{t}">'),
+                     (r'<meta name="twitter:description" content="[^"]*">', f'<meta name="twitter:description" content="{d}">'),
+                     (r'<link rel="canonical" href="[^"]*">', f'<link rel="canonical" href="{u}">'),
+                     (r'<meta property="og:url" content="[^"]*">', f'<meta property="og:url" content="{u}">')):
+        html = re.sub(pat, lambda _m, v=val: v, html, count=1)
+    head_extra = ('<meta name="robots" content="noindex">' if status == 404 else "")
+    if ld:
+        head_extra += '<script type="application/ld+json">' + json.dumps(ld).replace("</", "<\\/") + "</script>"
+    html = html.replace("</head>", head_extra + "\n</head>", 1)
+    html = html.replace('<main id="view"></main>', f'<main id="view">{body}</main>', 1)
+    return status, html
 
 
 # ---------------------------------------------------------------- README badges
@@ -531,7 +635,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(200, fh.read(), ctype, "public, max-age=86400")
             if u.path == "/healthz":
                 return self.send(200, "ok", "text/plain")
-            return self.send(200, page_html(u.path), "text/html; charset=utf-8", "public, max-age=300")
+            status, html = page_html(u.path)
+            return self.send(status, html, "text/html; charset=utf-8", "public, max-age=300")
         except KeyError:
             return self.send(404, '{"error":"not found"}', "application/json")
         except Exception:

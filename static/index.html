@@ -67,6 +67,7 @@
   .hero { padding: 20px 0 8px; }
   .hero h1 { font-size: 26px; letter-spacing: -.5px; margin: 0 0 4px; }
   .hero p { margin: 0; color: var(--muted); }
+  .hero p a { color: var(--link); }
 
   .controls { display: flex; flex-direction: column; gap: 10px; padding: 14px 0; border-bottom: 1px solid var(--line); }
   .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
@@ -310,6 +311,7 @@ const DEFAULTS = { q: "", view: "repos", type: "", sort: "points", min_points: "
 function readState() {
   const p = new URLSearchParams(location.search), s = { ...DEFAULTS };
   for (const k in DEFAULTS) if (p.has(k)) s[k] = p.get(k);
+  if (location.pathname === "/show-hn" && !p.has("type")) s.type = "show";
   return s;
 }
 function stateQuery(s, extra = {}) {
@@ -339,6 +341,7 @@ function select(name, opts, value, label) {
 }
 
 let navToken = 0;
+const dirtyNoType = (s) => Object.keys(DEFAULTS).some(k => !["view", "q", "type"].includes(k) && s[k] !== DEFAULTS[k]);
 const searchUrl = (s, page) => `/api/search?${stateQuery(s, { page })}`;
 
 async function renderList() {
@@ -352,7 +355,9 @@ async function renderList() {
   if (token !== navToken) return;
   busy(false);
 
-  document.title = s.q ? `${s.q} - HackerGit` : "HackerGit: GitHub repos on Hacker News";
+  document.title = s.q ? `${s.q} - HackerGit`
+    : s.type === "show" && !dirtyNoType(s) ? "Best Show HN projects on GitHub - HackerGit"
+    : "HackerGit: every GitHub repo shared on Hacker News";
   $("#q").value = s.q;
   const years = [], now = new Date().getUTCFullYear();
   for (let y = now; y >= 2007; y--) years.push([String(y), String(y)]);
@@ -366,7 +371,9 @@ async function renderList() {
   view.innerHTML = `
     ${!s.q && !dirty ? `<section class="hero"><h1>Every GitHub repo Hacker News has shared.</h1>
       <p>${st ? `${fmt(st.repos)} repos from ${fmt(st.stories)} Hacker News posts since ${new Date(st.first * 1000).getUTCFullYear()}. ` : ""}Search them and sort by points, comments, stars, or the karma of whoever posted it.</p>
-      <p class="hero-badge">Was your repo on Hacker News? <a href="/badges">Get a badge for your README →</a></p></section>` : ""}
+      <p class="hero-badge">Was your repo on Hacker News? <a href="/badges">Get a badge for your README →</a></p></section>`
+      : !s.q && s.type === "show" && !dirtyNoType(s) ? `<section class="hero"><h1>Best Show HN projects on GitHub</h1>
+      <p>Open source projects launched with a Show HN post, ranked by points. Filter by comments, stars or the poster's karma to find hidden gems.</p></section>` : ""}
     <section class="controls">
       <div class="row">
         ${SORTS.filter(([k]) => k !== "stars" || hasStars).map(([k, t]) => `<button class="chip${s.sort === k ? " on" : ""}" data-sort="${k}">${t}</button>`).join("")}
@@ -635,7 +642,7 @@ function parseRepoInput(t) {
 }
 
 function renderBadges() {
-  document.title = "README badge - HackerGit";
+  document.title = "Hacker News badge for your GitHub README (Show HN badge) - HackerGit";
   const initial = new URLSearchParams(location.search).get("repo") || "";
   view.innerHTML = `<div class="page about">
     <h1>A Hacker News badge for your README</h1>
@@ -677,7 +684,7 @@ function renderBadges() {
 }
 
 async function renderAbout() {
-  document.title = "About - HackerGit";
+  document.title = "About HackerGit: GitHub repos on Hacker News";
   const st = await statsP;
   view.innerHTML = `<article class="about page">
     <h1>About HackerGit</h1>
