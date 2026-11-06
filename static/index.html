@@ -25,18 +25,21 @@
     --bg: #ffffff; --bg2: #f6f8fa; --bg3: #eaeef2; --text: #1f2328; --muted: #59636e; --line: #d1d9e0;
     --accent: #ff6600; --accent-soft: rgba(255,102,0,.12); --link: #0969da; --hover: rgba(0,0,0,.04);
     --chip-on: #1f2328; --chip-on-text: #ffffff;
+    --s1: #2a78d6; --s2: #eb6834;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       --bg: #0d1117; --bg2: #151b23; --bg3: #212830; --text: #e6edf3; --muted: #9198a1; --line: #30363d;
       --accent-soft: rgba(255,102,0,.18); --link: #4493f8; --hover: rgba(255,255,255,.04);
       --chip-on: #e6edf3; --chip-on-text: #0d1117;
+      --s1: #3987e5; --s2: #d95926;
     }
   }
   :root[data-theme="dark"] {
     --bg: #0d1117; --bg2: #151b23; --bg3: #212830; --text: #e6edf3; --muted: #9198a1; --line: #30363d;
     --accent-soft: rgba(255,102,0,.18); --link: #4493f8; --hover: rgba(255,255,255,.04);
     --chip-on: #e6edf3; --chip-on-text: #0d1117;
+    --s1: #3987e5; --s2: #d95926;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--bg); color: var(--text); }
@@ -150,6 +153,34 @@
   .postcard .meta { margin-top: 2px; }
   .discuss { max-width: 100%; display: inline-block; margin-top: 10px; padding: 6px 12px; border-radius: 8px; background: var(--bg2); border: 1px solid var(--line); font-size: 13px; font-weight: 600; color: var(--link); }
   .discuss:hover { background: var(--bg3); }
+  .trend { margin: 6px 0 22px; }
+  .trend h3 { font-size: 15px; margin: 0; }
+  .trend-sub { color: var(--muted); font-size: 13px; margin: 2px 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chart { margin: 0; }
+  .chart-box { position: relative; }
+  .chart svg { display: block; max-width: 100%; height: auto; overflow: visible; }
+  .chart .grid { stroke: var(--line); stroke-width: 1; }
+  .chart .axis { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .chart .ln { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .chart .ln.s1, .chart .stem.s1 { stroke: var(--s1); } .chart .ln.s2 { stroke: var(--s2); }
+  .chart .dotm.s1 { fill: var(--s1); } .chart .dotm.s2 { fill: var(--s2); }
+  .chart .ring { stroke: var(--bg); stroke-width: 2; }
+  .chart .stem { stroke: var(--s2); stroke-width: 2; stroke-linecap: round; opacity: .55; }
+  .chart .lolli { cursor: pointer; outline: none; }
+  .chart .lolli:hover .stem, .chart .lolli:focus .stem { opacity: 1; }
+  .chart .hair { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
+  .chart .dlabel { fill: var(--text); font-size: 11.5px; font-weight: 600; }
+  .legend { display: flex; gap: 14px; font-size: 12.5px; color: var(--muted); margin-bottom: 4px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .tip { position: absolute; top: 4px; pointer-events: none; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; font-size: 12.5px; box-shadow: 0 4px 14px rgba(0,0,0,.12); max-width: 260px; z-index: 2; }
+  .tip-h { color: var(--muted); font-size: 11.5px; margin-bottom: 3px; }
+  .tip-r { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+  .tip-t { margin-top: 3px; color: var(--text); }
+  .tip-k { display: inline-block; width: 12px; height: 2px; border-radius: 1px; margin-right: 3px; }
+  .tip-k.s1 { background: var(--s1); } .tip-k.s2 { background: var(--s2); }
+  .chart-table summary { font-size: 12px; color: var(--muted); cursor: pointer; margin-top: 2px; }
+  .chart-table table { font-size: 12px; border-collapse: collapse; margin-top: 6px; display: block; max-height: 220px; overflow: auto; }
+  .chart-table th, .chart-table td { text-align: left; padding: 2px 10px 2px 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
   .badgedetails { margin-top: 32px; border: 1px solid var(--line); border-radius: 10px; }
   .badgedetails summary { cursor: pointer; padding: 12px 16px; font-weight: 600; font-size: 14px; list-style: none; display: flex; align-items: center; gap: 8px; }
   .badgedetails summary::-webkit-details-marker { display: none; }
@@ -565,14 +596,212 @@ async function renderRepo(key) {
     </div>
     <h2 class="sect">${r.subs === 1 ? "On Hacker News" : `On Hacker News, ${fmt(r.subs)} times`}</h2>
     <div id="posts">${postCards(d.posts)}</div>
+    <div id="trends"></div>
     <details class="badgedetails">
       <summary>Add a Hacker News badge to your README</summary>
       ${badgeBox(r, "Style")}
     </details>
   </div>`;
+  renderTrends(r, d.posts);
   const all = $("#all-posts");
   if (all) all.onclick = () => { $("#posts").innerHTML = postCards(d.posts, Infinity); };
   wireBadgeBox(r);
+}
+
+// ---------------------------------------------------------------- charts (plain SVG, no library)
+const SVGNS = "http://www.w3.org/2000/svg";
+const svgEl = (tag, attrs = {}) => { const e = document.createElementNS(SVGNS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; };
+const shortDate = (t) => { const d = new Date(t * 1000); return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`; };
+const timeLabel = (t, span) => {
+  const d = new Date(t * 1000);
+  if (span < 2 * 86400) return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+  if (span < 400 * 86400) return shortDate(t);
+  return String(d.getUTCFullYear());
+};
+// time ticks on round hours / days / months / years (UTC)
+function timeTicks(t0, t1, max = 5) {
+  const span = t1 - t0 || 1, H = 3600, D = 86400;
+  if (span > 3 * 365 * D) {
+    const y0 = new Date(t0 * 1000).getUTCFullYear() + 1, y1 = new Date(t1 * 1000).getUTCFullYear();
+    const step = Math.max(1, Math.ceil((y1 - y0 + 1) / max)), out = [];
+    for (let y = y0; y <= y1; y += step) out.push(Date.UTC(y, 0, 1) / 1000);
+    return out;
+  }
+  const steps = [10 * 60, 30 * 60, H, 2 * H, 3 * H, 6 * H, 12 * H, D, 2 * D, 7 * D, 14 * D, 30 * D, 91 * D, 182 * D, 365 * D];
+  const step = steps.find(st => span / st <= max) || steps[steps.length - 1], out = [];
+  for (let t = Math.ceil(t0 / step) * step; t <= t1; t += step) out.push(t);
+  return out;
+}
+function niceTicks(lo, hi, n = 4) {
+  const span = hi - lo || 1, raw = span / n, mag = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => s >= raw) || raw;
+  const out = []; for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(Math.round(v * 100) / 100);
+  return out;
+}
+
+// Line chart. series: [{name, cls, points: [[t, v, extra?]]}]; opts: {invert, yFmt, tipExtra, title}
+function lineChart(series, opts = {}) {
+  const wrap = document.createElement("figure"); wrap.className = "chart";
+  const W = Math.max(300, Math.min(940, view.clientWidth - 2)), H = 190, m = { l: 44, r: series.length > 1 ? 70 : 16, t: 12, b: 26 };
+  const all = series.flatMap(s => s.points);
+  const t0 = Math.min(...all.map(p => p[0])), t1 = Math.max(...all.map(p => p[0]));
+  let v0 = Math.min(...all.map(p => p[1])), v1 = Math.max(...all.map(p => p[1]));
+  if (opts.invert) { v0 = 1; v1 = Math.max(v1, 5); }
+  else if (opts.fit) { const pad = Math.max(1, (v1 - v0) * 0.15); v0 = Math.max(0, v0 - pad); v1 = v1 + pad; }
+  else { v0 = Math.min(0, v0); if (v1 === v0) v1 = v0 + 1; }
+  const x = (t) => m.l + (t1 === t0 ? 0.5 : (t - t0) / (t1 - t0)) * (W - m.l - m.r);
+  const y = (v) => opts.invert ? m.t + (v - v0) / (v1 - v0 || 1) * (H - m.t - m.b) : H - m.b - (v - v0) / (v1 - v0) * (H - m.t - m.b);
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: "img", "aria-label": opts.title || "chart" });
+  let ticks = niceTicks(v0, v1).filter(v => v >= v0 && (!opts.invert || v >= 1));
+  if (opts.invert && !ticks.includes(1)) ticks = [1, ...ticks.filter(v => v - 1 > (v1 - v0) * 0.12)];
+  if (opts.fit) ticks = ticks.map(Math.round);
+  for (const v of ticks) {
+    svg.append(svgEl("line", { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), class: "grid" }));
+    const tx = svgEl("text", { x: m.l - 8, y: y(v) + 4, class: "axis", "text-anchor": "end" }); tx.textContent = (opts.axisFmt || opts.yFmt || short)(v); svg.append(tx);
+  }
+  for (const t of timeTicks(t0, t1, 4)) {
+    const tx = svgEl("text", { x: x(t), y: H - 6, class: "axis", "text-anchor": "middle" }); tx.textContent = timeLabel(t, t1 - t0); svg.append(tx);
+  }
+  for (const s of series) {
+    const d = s.points.map((p, i) => `${i ? "L" : "M"}${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join("");
+    svg.append(svgEl("path", { d, class: `ln ${s.cls}` }));
+    if (s.points.length === 1) svg.append(svgEl("circle", { cx: x(s.points[0][0]), cy: y(s.points[0][1]), r: 4, class: `dotm ${s.cls}` }));
+    if (series.length > 1) {  // direct label at the line's end
+      const last = s.points[s.points.length - 1];
+      const lb = svgEl("text", { x: x(last[0]) + 6, y: y(last[1]) + 4, class: "dlabel" }); lb.textContent = s.name; svg.append(lb);
+    }
+  }
+  // hover: crosshair snaps to the nearest time; one tooltip lists every series
+  const hair = svgEl("line", { y1: m.t, y2: H - m.b, class: "hair", visibility: "hidden" }); svg.append(hair);
+  const marks = series.map(s => { const c = svgEl("circle", { r: 4, class: `dotm ${s.cls}`, visibility: "hidden" }); svg.append(c); return c; });
+  const tip = document.createElement("div"); tip.className = "tip"; tip.hidden = true;
+  const hit = svgEl("rect", { x: m.l, y: 0, width: W - m.l - m.r, height: H, fill: "transparent" }); svg.append(hit);
+  const move = (ev) => {
+    const r = svg.getBoundingClientRect(), px = (ev.clientX - r.left) * (W / r.width);
+    const tAt = t0 + (px - m.l) / (W - m.l - m.r) * (t1 - t0);
+    let near = null;
+    for (const p of all) if (!near || Math.abs(p[0] - tAt) < Math.abs(near - tAt)) near = p[0];
+    hair.setAttribute("x1", x(near)); hair.setAttribute("x2", x(near)); hair.setAttribute("visibility", "visible");
+    tip.replaceChildren();
+    const head = document.createElement("div"); head.className = "tip-h"; head.textContent = new Date(near * 1000).toUTCString().slice(5, 22) + " UTC"; tip.append(head);
+    const gap = Math.max(600, (t1 - t0) / 60);  // a series with no point near this time isn't listed
+    series.forEach((s, i) => {
+      const p = s.points.reduce((a, b) => Math.abs(b[0] - near) < Math.abs(a[0] - near) ? b : a);
+      if (Math.abs(p[0] - near) > gap) { marks[i].setAttribute("visibility", "hidden"); return; }
+      marks[i].setAttribute("cx", x(p[0])); marks[i].setAttribute("cy", y(p[1])); marks[i].setAttribute("visibility", "visible");
+      const row = document.createElement("div"); row.className = "tip-r";
+      const key = document.createElement("span"); key.className = `tip-k ${s.cls}`;
+      const val = document.createElement("b"); val.textContent = (opts.yFmt || fmt)(p[1]);
+      const lab = document.createElement("span"); lab.textContent = " " + s.name + (opts.tipExtra ? opts.tipExtra(p) : "");
+      row.append(key, val, lab); tip.append(row);
+    });
+    tip.hidden = false;
+    const left = Math.min(r.width - 170, Math.max(0, x(near) * r.width / W + 12));
+    tip.style.left = left + "px";
+  };
+  hit.addEventListener("pointermove", move);
+  hit.addEventListener("pointerleave", () => { tip.hidden = true; hair.setAttribute("visibility", "hidden"); marks.forEach(c => c.setAttribute("visibility", "hidden")); });
+  const box = document.createElement("div"); box.className = "chart-box"; box.append(svg, tip);
+  if (series.length > 1) {
+    const lg = document.createElement("div"); lg.className = "legend";
+    for (const s of series) { const it = document.createElement("span"); const k = document.createElement("span"); k.className = `tip-k ${s.cls}`; it.append(k, document.createTextNode(s.name)); lg.append(it); }
+    wrap.append(lg);
+  }
+  wrap.append(box, dataTable(series, opts));
+  return wrap;
+}
+
+// Lollipop timeline: one stem per HN post (x = date, y = points). Each stem has its own tooltip.
+function postsChart(posts) {
+  const wrap = document.createElement("figure"); wrap.className = "chart";
+  const W = Math.max(300, Math.min(940, view.clientWidth - 2)), H = 190, m = { l: 44, r: 16, t: 12, b: 26 };
+  const t0 = Math.min(...posts.map(p => p.time)), t1 = Math.max(...posts.map(p => p.time));
+  const pad = Math.max(86400 * 20, (t1 - t0) * 0.04), a = t0 - pad, b = t1 + pad;
+  const v1 = Math.max(...posts.map(p => p.points), 1);
+  const x = (t) => m.l + (t - a) / (b - a) * (W - m.l - m.r), y = (v) => H - m.b - v / v1 * (H - m.t - m.b);
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: "img", "aria-label": "Points of every Hacker News post over time" });
+  for (const v of niceTicks(0, v1)) {
+    svg.append(svgEl("line", { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), class: "grid" }));
+    const tx = svgEl("text", { x: m.l - 8, y: y(v) + 4, class: "axis", "text-anchor": "end" }); tx.textContent = short(v); svg.append(tx);
+  }
+  for (const t of timeTicks(a, b, 5)) {
+    const tx = svgEl("text", { x: x(t), y: H - 6, class: "axis", "text-anchor": "middle" }); tx.textContent = timeLabel(t, b - a); svg.append(tx);
+  }
+  const tip = document.createElement("div"); tip.className = "tip"; tip.hidden = true;
+  const sorted = [...posts].sort((p, q) => p.points - q.points);  // big ones drawn last (on top)
+  for (const p of sorted) {
+    const g = svgEl("g", { class: "lolli", tabindex: 0 });
+    g.append(svgEl("line", { x1: x(p.time), x2: x(p.time), y1: y(0), y2: y(p.points), class: "stem" }),
+             svgEl("circle", { cx: x(p.time), cy: y(p.points), r: 4.5, class: "dotm s2 ring" }),
+             svgEl("rect", { x: x(p.time) - 8, y: m.t, width: 16, height: H - m.t - m.b, fill: "transparent" }));
+    const show = () => {
+      tip.replaceChildren();
+      const h = document.createElement("div"); h.className = "tip-h"; h.textContent = date(p.time);
+      const r1 = document.createElement("div"); r1.className = "tip-r"; const bv = document.createElement("b"); bv.textContent = fmt(p.points); r1.append(bv, document.createTextNode(` points · ${fmt(p.comments)} comments`));
+      const r2 = document.createElement("div"); r2.className = "tip-t"; r2.textContent = p.title;
+      tip.append(h, r1, r2); tip.hidden = false;
+      const r = svg.getBoundingClientRect(); tip.style.left = Math.min(r.width - 230, Math.max(0, x(p.time) * r.width / W + 12)) + "px";
+    };
+    g.addEventListener("pointerenter", show); g.addEventListener("focus", show);
+    g.addEventListener("pointerleave", () => { tip.hidden = true; }); g.addEventListener("blur", () => { tip.hidden = true; });
+    g.addEventListener("click", () => window.open(hn(p.id), "_blank", "noopener"));
+    svg.append(g);
+  }
+  const box = document.createElement("div"); box.className = "chart-box"; box.append(svg, tip);
+  wrap.append(box, dataTable([{ name: "Points", points: posts.map(p => [p.time, p.points, p.title]) }], { yFmt: fmt, dateOnly: true, extraCol: "Post" }));
+  return wrap;
+}
+
+function dataTable(series, opts = {}) {
+  const det = document.createElement("details"); det.className = "chart-table";
+  const sum = document.createElement("summary"); sum.textContent = "Data table"; det.append(sum);
+  const tbl = document.createElement("table"); const head = tbl.insertRow();
+  for (const h of ["Time (UTC)", ...series.map(s => s.name), ...(opts.extraCol ? [opts.extraCol] : [])]) { const th = document.createElement("th"); th.textContent = h; head.append(th); }
+  const times = [...new Set(series.flatMap(s => s.points.map(p => p[0])))].sort((a, b) => a - b);
+  const step = Math.max(1, Math.ceil(times.length / 200));  // keep the table readable
+  times.filter((_, i) => i % step === 0 || i === times.length - 1).forEach(t => {
+    const row = tbl.insertRow();
+    row.insertCell().textContent = opts.dateOnly ? date(t) : new Date(t * 1000).toISOString().slice(0, 16).replace("T", " ");
+    for (const s of series) { const p = s.points.find(q => q[0] === t); row.insertCell().textContent = p ? (opts.yFmt || fmt)(p[1]) : ""; }
+    if (opts.extraCol) { const p = series[0].points.find(q => q[0] === t); row.insertCell().textContent = p ? p[2] : ""; }
+  });
+  det.append(tbl); return det;
+}
+
+async function renderTrends(r, posts) {
+  const box = $("#trends"); if (!box) return;
+  const d = await api(`/api/series?key=${encodeURIComponent(r.key)}`).catch(() => null);
+  if (!d || !document.body.contains(box)) return;
+  const parts = [];
+  const add = (title, sub, el) => {
+    const sec = document.createElement("section"); sec.className = "trend";
+    const h = document.createElement("h3"); h.textContent = title; sec.append(h);
+    if (sub) { const p = document.createElement("p"); p.className = "trend-sub"; p.textContent = sub; sec.append(p); }
+    sec.append(el); parts.push(sec);
+  };
+  if (posts.length > 1) add("Every Hacker News post", `${posts.length} posts. Hover a dot for details; click to open the discussion.`, postsChart(posts));
+  // the most recent post with live data
+  const withPts = posts.filter(p => (d.points[p.id] || []).length > 1).sort((a, b) => b.time - a.time)[0];
+  if (withPts) {
+    const pts = d.points[withPts.id];
+    add("Points over time", `“${withPts.title}”`, lineChart([{ name: "Points", cls: "s2", points: pts }],
+        { title: "Points over time", yFmt: fmt, axisFmt: short, tipExtra: (p) => ` · ${fmt(p[2])} comments` }));
+  }
+  const withRank = posts.filter(p => d.ranks[p.id]).sort((a, b) => b.time - a.time)[0];
+  if (withRank) {
+    const rk = d.ranks[withRank.id], ser = [];
+    if (rk.front && rk.front.length) ser.push({ name: "Front page", cls: "s1", points: rk.front });
+    if (rk.show && rk.show.length) ser.push({ name: "Show HN", cls: "s2", points: rk.show });
+    if (ser.some(s => s.points.length > 1))
+      add("Rank on Hacker News", `“${withRank.title}” · position over time, #1 at the top`, lineChart(ser, { invert: true, title: "Rank on Hacker News", yFmt: (v) => "#" + v }));
+  }
+  if (d.stars.length > 1) {
+    const st = d.stars.map(([day, n]) => [Date.parse(day + "T00:00:00Z") / 1000, n]);
+    add("GitHub stars", "Daily star count", lineChart([{ name: "Stars", cls: "s1", points: st }], { title: "GitHub stars", yFmt: fmt, axisFmt: short, fit: true }));
+  }
+  if (!parts.length) return;
+  const h = document.createElement("h2"); h.className = "sect"; h.textContent = "Trends";
+  box.replaceChildren(h, ...parts);
 }
 
 async function renderUser(name) {

@@ -214,6 +214,22 @@ def search(p):
             "results": [dict(r) for r in rows]}
 
 
+def series(key):
+    """Time series for a repo's charts: live points/comments and rank positions per post, and daily stars."""
+    con = db()
+    key = key.lower()
+    ids = [r[0] for r in con.execute("SELECT id FROM stories WHERE lower(repo) = ?", (key,))]
+    out = {"points": {}, "ranks": {}, "stars": []}
+    if ids:
+        qs = ",".join("?" * len(ids))
+        for i, t, pts, com in con.execute(f"SELECT id, t, points, comments FROM points_log WHERE id IN ({qs}) ORDER BY t", ids):
+            out["points"].setdefault(str(i), []).append([t, pts, com])
+        for i, lst, t, pos in con.execute(f"SELECT id, list, t, pos FROM rank_log WHERE id IN ({qs}) ORDER BY t", ids):
+            out["ranks"].setdefault(str(i), {}).setdefault(lst, []).append([t, pos])
+    out["stars"] = [[d, n] for d, n in con.execute("SELECT day, stars FROM stars_log WHERE key = ? ORDER BY day", (key,))]
+    return out
+
+
 TRENDING = {"day": 86400, "week": 7 * 86400, "month": 30 * 86400}
 
 
@@ -657,6 +673,8 @@ def api(path, p):
         return repo_detail((p.get("key") or [""])[0])
     if path == "/api/user":
         return user_detail((p.get("name") or [""])[0])
+    if path == "/api/series":
+        return series((p.get("key") or [""])[0])
     if path == "/api/trending":
         period = (p.get("period") or ["day"])[0]
         return trending(period if period in TRENDING else "day", (p.get("show") or ["0"])[0] == "1")

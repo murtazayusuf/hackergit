@@ -117,6 +117,12 @@ Show how your repo did on Hacker News. Replace `owner/repo` with yours:
 The card is 250×55, the same size as Trendshift-style README cards, and shows points, comments and number of HN posts.
 Add `&theme=dark` for dark READMEs.
 
+**Rank badge** (`?style=rank`): shows the repo's best achievement on Hacker News, such as
+"#1 Repo of the Day", "#3 Show HN of the Week", "#2 Repo of 2023" or a live front page position.
+Ranks compare GitHub posts on HN by points for the same day, week, month or year. Falls back to the points card.
+
+<a href="https://hackergit.org/r/karpathy/nanoGPT"><img src="https://hackergit.org/badge/karpathy/nanoGPT.svg?style=rank" alt="Hacker News" width="250" height="55"></a>
+
 Prefer a small shields.io-style badge? Drop `?style=card`:
 
 [![Hacker News](https://hackergit.org/badge/karpathy/nanoGPT.svg)](https://hackergit.org/r/karpathy/nanoGPT)
