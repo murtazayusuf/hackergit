@@ -133,6 +133,16 @@
   .ach { display: inline-flex; align-items: center; gap: 10px; margin: 10px 0 2px; padding: 6px 14px 6px 6px; border: 1px solid var(--accent); border-radius: 999px; background: var(--accent-soft); font-size: 14px; }
   .ach-medal { background: var(--accent); color: #fff; font-weight: 800; border-radius: 999px; padding: 3px 9px; font-size: 13px; }
   .ach-when { color: var(--muted); }
+  .rgrid { display: flex; flex-direction: column; gap: 8px; }
+  .rg-row { display: grid; grid-template-columns: 170px repeat(5, 1fr); gap: 8px; align-items: stretch; }
+  .rg-name { font-size: 12.5px; color: var(--muted); align-self: center; }
+  .rg-cell { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; display: flex; flex-direction: column; background: var(--bg2); }
+  .rg-cell span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+  .rg-cell b { font-size: 17px; font-variant-numeric: tabular-nums; }
+  .rg-cell small { font-size: 11px; color: var(--muted); }
+  .rg-cell.top { border-color: var(--accent); background: var(--accent-soft); }
+  .rg-cell.top b { color: var(--accent); }
+  @media (max-width: 640px) { .rg-row { grid-template-columns: repeat(5, 1fr); gap: 5px; } .rg-name { grid-column: 1 / -1; } .rg-cell { padding: 5px 6px; } .rg-cell b { font-size: 14px; } }
   .repostats { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 13.5px; margin: 10px 0 6px; align-items: center; }
   .repostats b { color: var(--text); font-variant-numeric: tabular-nums; }
   h2.sect { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin: 26px 0 10px; }
@@ -216,6 +226,8 @@
   .badgefmt .badgelink { margin-top: 0; }
   .badgecode code { white-space: pre; }
   .badgelink[hidden] { display: none; }
+  #rank-pick-wrap { margin: 0 0 10px; }
+  #rank-pick { height: 30px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); padding: 0 6px; }
   .badgelink { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-top: 10px; cursor: pointer; }
   .badgehint code { font: 12px ui-monospace, monospace; }
   .about { max-width: 720px; font-size: 15px; line-height: 1.65; }
@@ -549,6 +561,14 @@ function rankPills(p) {
   if (page1 >= 1) out.push(`<span class="rk" title="Time in the top 30 (page one) of the ${(p.front_minutes || 0) >= (p.show_minutes || 0) ? "front page" : "Show HN page"}">${dur(page1)} on page one</span>`);
   return out.length ? `<div class="rks">${out.join("")}</div>` : "";
 }
+const PERIODS = [["day", "Day"], ["week", "Week"], ["month", "Month"], ["year", "Year"], ["alltime", "All time"]];
+function rankingsGrid(rankings) {
+  if (!rankings || !rankings.length) return "";
+  const rows = rankings.map(g => `<div class="rg-row"><div class="rg-name">${g.scope === "show" ? "Among Show HN posts" : "Among GitHub repos on HN"}</div>
+    ${PERIODS.map(([k, t]) => { const v = g.ranks[k]; const lbl = k === "year" ? v.start.slice(0, 4) : t;
+      return `<div class="rg-cell${v.rank <= 3 ? " top" : ""}" title="#${fmt(v.rank)} of ${fmt(v.total)} ${k === "alltime" ? "" : "posts in that " + (k === "year" ? "year" : k)}"><span>${lbl}</span><b>#${fmt(v.rank)}</b><small>of ${short(v.total)}</small></div>`; }).join("")}</div>`).join("");
+  return `<div class="rgrid">${rows}</div>`;
+}
 function postCards(posts, limit = POSTS_SHOWN) {
   const sorted = [...posts].sort((a, b) => b.points - a.points || b.time - a.time);
   return `<div class="postcards">${sorted.slice(0, limit).map((p, i) => {
@@ -594,12 +614,14 @@ async function renderRepo(key) {
       ${r.stars != null ? `<span><b>${fmt(r.stars)}</b> stars</span>` : ""}
       ${r.lang ? `<span><span class="dot" style="background:${LANG_COLORS[r.lang] || "#8b949e"}"></span>${esc(r.lang)}</span>` : ""}
     </div>
+    <h2 class="sect">Rankings (best post, by points)</h2>
+    ${rankingsGrid(d.rankings)}
     <h2 class="sect">${r.subs === 1 ? "On Hacker News" : `On Hacker News, ${fmt(r.subs)} times`}</h2>
     <div id="posts">${postCards(d.posts)}</div>
     <div id="trends"></div>
     <details class="badgedetails">
       <summary>Add a Hacker News badge to your README</summary>
-      ${badgeBox(r, "Style")}
+      ${badgeBox(Object.assign(r, { _rankings: d.rankings }), "Style")}
     </details>
   </div>`;
   renderTrends(r, d.posts);
@@ -853,6 +875,11 @@ function badgeBox(r, title) {
         ${r.ach_rank != null ? `<button type="button" data-bs="rank" class="on">Rank</button><button type="button" data-bs="rank-dark">Rank (dark)</button>` : ""}<button type="button" data-bs="card"${r.ach_rank == null ? ' class="on"' : ""}>Card</button><button type="button" data-bs="card-dark">Card (dark)</button><button type="button" data-bs="small">Small</button>
       </div>
     </div>
+    ${r.ach_rank != null && r._rankings ? `<label class="badgelink" id="rank-pick-wrap">Ranking
+      <select id="rank-pick">
+        <option value="">Best (automatic)</option>
+        ${r._rankings.map(g => PERIODS.map(([k, t]) => `<option value="${k}${g.scope === "show" ? "|show" : ""}">${g.scope === "show" ? "Show HN · " : ""}${k === "year" ? g.ranks.year.start.slice(0, 4) : t}: #${fmt(g.ranks[k].rank)}</option>`).join("")).join("")}
+      </select></label>` : ""}
     <div class="badgepreview" id="badge-preview"></div>
     <div class="badgefmt">
       <div class="seg" role="group" aria-label="Code format">
@@ -870,8 +897,14 @@ function wireBadgeBox(r) {
   if (!box) return;
   let style = r.ach_rank != null ? "rank" : "card", format = "html";
   const update = () => {
-    const q = { small: "", card: "?style=card", "card-dark": "?style=card&theme=dark",
-                rank: "?style=rank", "rank-dark": "?style=rank&theme=dark" }[style];
+    let q = { small: "", card: "?style=card", "card-dark": "?style=card&theme=dark",
+              rank: "?style=rank", "rank-dark": "?style=rank&theme=dark" }[style];
+    const pick = $("#rank-pick"), pickWrap = $("#rank-pick-wrap");
+    if (pickWrap) pickWrap.hidden = !style.startsWith("rank");
+    if (pick && pick.value && style.startsWith("rank")) {
+      const [per, sc] = pick.value.split("|");
+      q += `&rank=${per}${sc ? "&scope=show" : ""}`;
+    }
     const img = `https://hackergit.org/badge/${r.repo}.svg${q}`;
     const href = $("#badge-hn").checked ? `https://news.ycombinator.com/item?id=${r.top_id}` : `https://hackergit.org/r/${r.repo}`;
     const size = style === "small" ? 'height="20"' : 'width="250" height="55"';
@@ -899,6 +932,7 @@ function wireBadgeBox(r) {
   });
   $("#badge-hn").onchange = update;
   $("#badge-center").onchange = update;
+  if ($("#rank-pick")) $("#rank-pick").onchange = update;
   const cb = $("#copy-badge");
   cb.onclick = async () => {
     const text = $("#badge-md").textContent;
@@ -945,6 +979,7 @@ function renderBadges() {
         <div class="badgehint">This repo hasn't been posted on Hacker News yet (as a link to its GitHub page). Check the spelling, or try again after it's been posted.</div></div>`;
       return;
     }
+    d.repo._rankings = d.rankings;
     out.innerHTML = badgeBox(d.repo, `<span class="mono">${esc(d.repo.repo)}</span> · <a href="/r/${esc(d.repo.repo)}">see its HN posts</a>`);
     wireBadgeBox(d.repo);
   };

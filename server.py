@@ -274,7 +274,7 @@ def repo_detail(key):
             LEFT JOIN ranks f ON f.id = s.id AND f.list = 'front'
             LEFT JOIN ranks sh ON sh.id = s.id AND sh.list = 'show'
             WHERE lower(s.repo) = ? ORDER BY s.time DESC""", (key.lower(),)).fetchall()
-    return {"repo": dict(r), "posts": [dict(x) for x in posts]}
+    return {"repo": dict(r), "posts": [dict(x) for x in posts], "rankings": repo_rankings(con, r)}
 
 
 def user_detail(name):
@@ -589,6 +589,58 @@ def ach_label(r):
     return f"#{rank} {noun} of the {per.title()}", small
 
 
+RANK_PERIODS = ("day", "week", "month", "year", "alltime")
+
+
+def post_rankings(con, post, scope="all"):
+    """Where one HN post ranks by points among GitHub posts on HN (or among Show HN posts, scope='show')
+    in its day / week / month / year, plus the repo's all-time rank. Returns {period: {...}}."""
+    import datetime as dt
+    t, pts = post["time"], post["points"]
+    d = dt.datetime.fromtimestamp(t, dt.timezone.utc).date()
+    to_ts = lambda x: int(dt.datetime(x.year, x.month, x.day, tzinfo=dt.timezone.utc).timestamp())
+    monday = d - dt.timedelta(days=d.weekday())
+    m0 = d.replace(day=1)
+    m1 = (m0 + dt.timedelta(days=32)).replace(day=1)
+    windows = {"day": (d, d + dt.timedelta(days=1)), "week": (monday, monday + dt.timedelta(days=7)),
+               "month": (m0, m1), "year": (dt.date(d.year, 1, 1), dt.date(d.year + 1, 1, 1))}
+    show_sql = " AND title LIKE 'Show HN%'" if scope == "show" else ""
+    out = {}
+    for per, (a, b) in windows.items():
+        rank, total = con.execute(f"""SELECT sum(points > ?) + 1, count(*) FROM stories
+            WHERE time >= ? AND time < ?{show_sql}""", (pts, to_ts(a), to_ts(b))).fetchone()
+        out[per] = {"rank": rank, "total": total, "start": a.isoformat()}
+    col = "show_points" if scope == "show" else "points"
+    rank, total = con.execute(f"SELECT sum({col} > ?) + 1, count({col}) FROM repos", (pts,)).fetchone()
+    out["alltime"] = {"rank": rank, "total": total, "start": ""}
+    return out
+
+
+def ranking_label(per, scope, info, pts):
+    """('#3 Repo of the Week', 'Week of Jan 9, 2023 · 474 points') for one ranking."""
+    noun = "Show HN" if scope == "show" else "Repo"
+    rank, start = info["rank"], info["start"]
+    if per == "alltime":
+        return f"#{rank:,} {noun} of All Time", f"{pts:,} points on Hacker News"
+    if per == "year":
+        return f"#{rank:,} {noun} of {start[:4]}", f"{pts:,} points on Hacker News"
+    when = {"day": _nice_date(start), "week": f"Week of {_nice_date(start)}", "month": _nice_date(start[:7])}[per]
+    return f"#{rank:,} {noun} of the {per.title()}", f"{when} · {pts:,} points"
+
+
+def repo_rankings(con, r):
+    """All rankings for a repo's top post, and for its best Show HN post if it has one."""
+    out = []
+    top = con.execute("SELECT id, time, points FROM stories WHERE id = ?", (r["top_id"],)).fetchone()
+    if top:
+        out.append({"scope": "all", "post_id": top["id"], "points": top["points"], "ranks": post_rankings(con, top)})
+    if r["show_id"]:
+        sp = con.execute("SELECT id, time, points FROM stories WHERE id = ?", (r["show_id"],)).fetchone()
+        if sp:
+            out.append({"scope": "show", "post_id": sp["id"], "points": sp["points"], "ranks": post_rankings(con, sp, "show")})
+    return out
+
+
 def badge_card(label, big, small, theme="light", muted=False, icon=None):
     """A 250x55 card badge (the size Trendshift and similar README cards use); wider only if the text needs it."""
     dark = theme == "dark"
@@ -633,9 +685,19 @@ def badge(path, query):
     r = db().execute("SELECT * FROM repos WHERE key = ?", (key,)).fetchone()
     style = (p.get("style") or [""])[0]
     if style == "rank":
+        theme = (p.get("theme") or ["light"])[0]
+        per = (p.get("rank") or ["best"])[0]
+        scope = "show" if (p.get("scope") or [""])[0] == "show" else "all"
+        if r and per in RANK_PERIODS:  # a specific ranking, e.g. ?rank=week or ?rank=alltime&scope=show
+            pid = r["show_id"] if scope == "show" else r["top_id"]
+            post = db().execute("SELECT id, time, points FROM stories WHERE id = ?", (pid,)).fetchone() if pid else None
+            if post:
+                info = post_rankings(db(), post, scope)[per]
+                big, small = ranking_label(per, scope, info, post["points"])
+                return badge_card(label, big, small, theme, icon=f"#{info['rank']}" if info["rank"] <= 99 else None)
         lab = ach_label(r)
         if lab:
-            return badge_card(label, lab[0], lab[1], (p.get("theme") or ["light"])[0], icon=f"#{r['ach_rank']}")
+            return badge_card(label, lab[0], lab[1], theme, icon=f"#{r['ach_rank']}")
         style = "card"  # no ranking: fall back to the points card
     if style == "card":
         theme = (p.get("theme") or ["light"])[0]
