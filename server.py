@@ -353,25 +353,23 @@ def _w(t, size, bold=False):
 
 
 def badge_card(label, big, small, theme="light", muted=False):
-    """A larger card badge (white or dark), in the style of GitHub-trending / spotlight cards."""
+    """A 250x55 card badge (the size Trendshift and similar README cards use); wider only if the text needs it."""
     dark = theme == "dark"
     bg, fg, sub = ("#0d1117", "#e6edf3", "#9198a1") if dark else ("#ffffff", "#1f2328", "#59636e")
     accent = "#9198a1" if muted else "#ff6600"
-    tx = 70
-    w = round(tx + max(_w(label, 11) * 1.15, _w(big, 21, True), _w(small, 12.5)) + 22)
-    w = max(w, 250)
-    h = 74
+    tx, h = 57, 55
+    w = max(250, round(tx + max(_w(label, 9.5) * 1.18, _w(big, 17, True), _w(small, 10.5)) + 14))
     L, B, S = xml_esc(label), xml_esc(big), xml_esc(small)
     font = "-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans',Helvetica,Arial,sans-serif"
     return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}" role="img" aria-label="{L}: {B}, {S}">
 <title>{L}: {B}, {S}</title>
-<rect x="1" y="1" width="{w - 2}" height="{h - 2}" rx="10" fill="{bg}" stroke="{accent}" stroke-width="2"/>
-<rect x="16" y="17" width="40" height="40" rx="8" fill="{accent}"/>
-<text x="36" y="46" fill="#fff" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="25" font-weight="bold" text-anchor="middle">Y</text>
+<rect x="1" y="1" width="{w - 2}" height="{h - 2}" rx="9" fill="{bg}" stroke="{accent}" stroke-width="1.5"/>
+<rect x="12" y="11" width="33" height="33" rx="7" fill="{accent}"/>
+<text x="28.5" y="35" fill="#fff" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="21" font-weight="bold" text-anchor="middle">Y</text>
 <g font-family="{font}">
-<text x="{tx}" y="25" fill="{accent}" font-size="11" font-weight="600" letter-spacing=".6">{L.upper()}</text>
-<text x="{tx}" y="47" fill="{fg}" font-size="21" font-weight="700">{B}</text>
-<text x="{tx}" y="64" fill="{sub}" font-size="12.5">{S}</text>
+<text x="{tx}" y="18.5" fill="{accent}" font-size="9.5" font-weight="600" letter-spacing=".6">{L.upper()}</text>
+<text x="{tx}" y="35" fill="{fg}" font-size="17" font-weight="700">{B}</text>
+<text x="{tx}" y="47.5" fill="{sub}" font-size="10.5">{S}</text>
 </g></svg>
 """
 
