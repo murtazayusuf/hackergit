@@ -72,6 +72,13 @@ CREATE TABLE IF NOT EXISTS github (
   key TEXT PRIMARY KEY, stars INTEGER, lang TEXT, descr TEXT, archived INTEGER, missing INTEGER DEFAULT 0, fetched INTEGER
 );
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
+-- Live HN rankings, recorded by polling the official API (HN keeps no history of positions).
+-- list: 'front' (front page, /v0/topstories) or 'show' (Show HN page, /v0/showstories).
+CREATE TABLE IF NOT EXISTS ranks (
+  id INTEGER, list TEXT, best_pos INTEGER, best_at INTEGER, first_seen INTEGER, last_seen INTEGER,
+  minutes_top30 REAL DEFAULT 0, minutes_listed REAL DEFAULT 0,
+  PRIMARY KEY (id, list)
+);
 -- Derived tables, rebuilt by rebuild(). One row per repo; one row per post with karma joined in.
 CREATE TABLE IF NOT EXISTS repos (
   key TEXT PRIMARY KEY, repo TEXT, owner TEXT, name TEXT,
@@ -233,6 +240,40 @@ def update_recent(con, days=3):
     latest = con.execute("SELECT max(time) FROM stories").fetchone()[0] or int(time.time()) - days * 86400
     after = min(latest, int(time.time())) - days * 86400
     return fetch_window(con, after, int(time.time()) + 60)
+
+
+# ---------------------------------------------------------------- live rankings (HN Firebase API)
+
+RANK_LISTS = {"front": "https://hacker-news.firebaseio.com/v0/topstories.json",
+              "show": "https://hacker-news.firebaseio.com/v0/showstories.json"}
+
+
+def track_ranks(con, interval_min):
+    """Record where every story sits on the front page and the Show HN page right now.
+    Keeps, per story and list: best position (and when), and minutes spent in the top 30 (page one)."""
+    now = int(time.time())
+    last = int(meta_get(con, "ranks_last_poll", 0) or 0)
+    # credit the time since the last poll, but never more than two intervals (e.g. after a restart)
+    step = min(max(now - last, 0), interval_min * 120) / 60 if last else interval_min
+    for lst, url in RANK_LISTS.items():
+        try:
+            ids = http_json(url, retries=2, timeout=30) or []
+        except Exception as e:
+            log(f"ranks: {lst} fetch failed: {e}")
+            continue
+        rows = [(sid, lst, pos, now, now, now, step if pos <= 30 else 0, step) for pos, sid in enumerate(ids, 1)]
+        con.executemany("""INSERT INTO ranks(id, list, best_pos, best_at, first_seen, last_seen, minutes_top30, minutes_listed)
+            VALUES (?,?,?,?,?,?,?,?)
+            ON CONFLICT(id, list) DO UPDATE SET
+              best_at = CASE WHEN excluded.best_pos < ranks.best_pos THEN excluded.best_at ELSE ranks.best_at END,
+              best_pos = min(ranks.best_pos, excluded.best_pos),
+              last_seen = excluded.last_seen,
+              minutes_top30 = ranks.minutes_top30 + excluded.minutes_top30,
+              minutes_listed = ranks.minutes_listed + excluded.minutes_listed""", rows)
+    meta_set(con, "ranks_last_poll", now)
+    if not meta_get(con, "ranks_since"):
+        meta_set(con, "ranks_since", now)
+    con.commit()
 
 
 # ---------------------------------------------------------------- karma (HN Firebase API)
@@ -403,6 +444,7 @@ def stats(con):
         "last_update": int(meta_get(con, "last_update", 0) or 0),
         "github_status": meta_get(con, "github_status", "not run yet"),
         "version": meta_get(con, "last_rebuild", "0"),
+        "ranks_since": int(meta_get(con, "ranks_since", 0) or 0),
     }
 
 

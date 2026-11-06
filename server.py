@@ -214,7 +214,12 @@ def repo_detail(key):
     if not r:
         return None
     posts = con.execute("""SELECT s.id, s.title, s.url, s.author, s.points, s.comments, s.time,
-            coalesce(u.karma, 0) AS karma FROM stories s LEFT JOIN users u ON u.name = s.author
+            coalesce(u.karma, 0) AS karma,
+            f.best_pos AS front_best, f.best_at AS front_best_at, f.minutes_top30 AS front_minutes,
+            sh.best_pos AS show_best, sh.best_at AS show_best_at, sh.minutes_top30 AS show_minutes
+            FROM stories s LEFT JOIN users u ON u.name = s.author
+            LEFT JOIN ranks f ON f.id = s.id AND f.list = 'front'
+            LEFT JOIN ranks sh ON sh.id = s.id AND sh.list = 'show'
             WHERE lower(s.repo) = ? ORDER BY s.time DESC""", (key.lower(),)).fetchall()
     return {"repo": dict(r), "posts": [dict(x) for x in posts]}
 
@@ -644,6 +649,17 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(500, '{"error":"server error"}', "application/json")
 
 
+def rank_tracker(minutes):
+    """Poll HN's front page and Show HN page every few minutes and record positions."""
+    con = hg.connect()
+    while True:
+        try:
+            hg.track_ranks(con, minutes)
+        except Exception:
+            traceback.print_exc()
+        time.sleep(minutes * 60)
+
+
 def updater(minutes):
     """Background loop: backfill if the database is empty, then pull fresh stories every few minutes."""
     while True:
@@ -670,6 +686,9 @@ def main():
     hg.connect().close()  # make sure the schema exists before readers open it
     if minutes > 0:
         threading.Thread(target=updater, args=(minutes,), daemon=True).start()
+    rank_minutes = float(os.environ.get("RANK_MINUTES", "2"))
+    if rank_minutes > 0:
+        threading.Thread(target=rank_tracker, args=(rank_minutes,), daemon=True).start()
     host = os.environ.get("HOST", "0.0.0.0")
     srv = ThreadingHTTPServer((host, port), Handler)
     srv.daemon_threads = True

@@ -132,6 +132,9 @@
   .pts-box span { font-size: 11px; font-weight: 600; }
   .pc-flag { font-size: 11px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 2px; }
   .pc-body { min-width: 0; }
+  .rks { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 4px; }
+  .rk { font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px; background: var(--bg3); color: var(--text); }
+  .rk.hot { background: var(--accent); color: #fff; }
   .pc-body .meta .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
   .postcard h3 { overflow-wrap: anywhere; margin: 0 0 4px; font-size: 17px; line-height: 1.35; }
   .postcard h3 a:hover { text-decoration: underline; }
@@ -491,6 +494,15 @@ view.addEventListener("click", async (e) => {
 
 // ---------------------------------------------------------------- repo + user pages
 const POSTS_SHOWN = 20;
+const dur = (m) => m >= 90 ? `${(m / 60).toFixed(m >= 600 ? 0 : 1).replace(/\.0$/, "")} h` : `${Math.max(1, Math.round(m))} min`;
+function rankPills(p) {
+  const out = [];
+  if (p.front_best) out.push(`<span class="rk${p.front_best <= 30 ? " hot" : ""}" title="Best position on the Hacker News front page, ${date(p.front_best_at)}">#${p.front_best} on the front page</span>`);
+  if (p.show_best) out.push(`<span class="rk${p.show_best <= 30 ? " hot" : ""}" title="Best position on the Show HN page, ${date(p.show_best_at)}">#${p.show_best} on Show HN</span>`);
+  const page1 = Math.max(p.front_minutes || 0, p.show_minutes || 0);
+  if (page1 >= 1) out.push(`<span class="rk" title="Time in the top 30 (page one) of the ${(p.front_minutes || 0) >= (p.show_minutes || 0) ? "front page" : "Show HN page"}">${dur(page1)} on page one</span>`);
+  return out.length ? `<div class="rks">${out.join("")}</div>` : "";
+}
 function postCards(posts, limit = POSTS_SHOWN) {
   const sorted = [...posts].sort((a, b) => b.points - a.points || b.time - a.time);
   return `<div class="postcards">${sorted.slice(0, limit).map((p, i) => {
@@ -500,6 +512,7 @@ function postCards(posts, limit = POSTS_SHOWN) {
       <div class="pc-body">
         ${i === 0 && posts.length > 1 ? `<div class="pc-flag">Top post</div>` : ""}
         <h3><a href="${hn(p.id)}" target="_blank" rel="noopener">${esc(p.title)}</a></h3>
+        ${rankPills(p)}
         <div class="meta">
           <span>by ${userLink(p.author, p.karma)}</span>
           <span>${date(p.time)}</span>
