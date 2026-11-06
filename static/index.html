@@ -131,6 +131,11 @@
   .badgepreview { padding: 14px; border: 1px dashed var(--line); border-radius: 8px; margin-bottom: 10px; background: #ffffff; }
   .badgepreview.darkbg { background: #0d1117; }
   .badgepreview img { display: block; max-width: 100%; }
+  .badgefmt { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; flex-wrap: wrap; }
+  .badgefmt .seg { margin-left: 0; }
+  .badgefmt .badgelink { margin-top: 0; }
+  .badgecode code { white-space: pre; }
+  .badgelink[hidden] { display: none; }
   .badgelink { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-top: 10px; cursor: pointer; }
   .badgehint code { font: 12px ui-monospace, monospace; }
   .about { max-width: 720px; font-size: 15px; line-height: 1.65; }
@@ -492,6 +497,12 @@ function badgeBox(r, title) {
       </div>
     </div>
     <div class="badgepreview" id="badge-preview"></div>
+    <div class="badgefmt">
+      <div class="seg" role="group" aria-label="Code format">
+        <button type="button" data-fmt="html" class="on">HTML</button><button type="button" data-fmt="md">Markdown</button>
+      </div>
+      <label class="badgelink" id="badge-center-wrap"><input type="checkbox" id="badge-center"> Center it</label>
+    </div>
     <div class="badgecode"><code class="mono" id="badge-md"></code><button class="chip" id="copy-badge" type="button">Copy</button></div>
     <label class="badgelink"><input type="checkbox" id="badge-hn"> Link to the Hacker News post instead of HackerGit</label>
     <div class="badgehint">${fmt(r.points)} points and ${fmt(r.comments)} comments across ${fmt(r.subs)} HN post${r.subs === 1 ? "" : "s"}. The badge updates by itself.</div>
@@ -500,12 +511,21 @@ function badgeBox(r, title) {
 function wireBadgeBox(r) {
   const box = $("#badgebox");
   if (!box) return;
-  let style = "card";
+  let style = "card", format = "html";
   const update = () => {
     const q = style === "small" ? "" : style === "card" ? "?style=card" : "?style=card&theme=dark";
     const img = `https://hackergit.org/badge/${r.repo}.svg${q}`;
     const href = $("#badge-hn").checked ? `https://news.ycombinator.com/item?id=${r.top_id}` : `https://hackergit.org/r/${r.repo}`;
-    $("#badge-md").textContent = `[![Hacker News](${img})](${href})`;
+    const size = style === "small" ? 'height="20"' : 'width="250" height="55"';
+    let code;
+    if (format === "html") {
+      code = `<a href="${href}"><img src="${img}" alt="Hacker News" ${size}></a>`;
+      if ($("#badge-center").checked) code = `<p align="center">\n  ${code}\n</p>`;
+    } else {
+      code = `[![Hacker News](${img})](${href})`;
+    }
+    $("#badge-center-wrap").hidden = format !== "html";
+    $("#badge-md").textContent = code;
     $("#badge-preview").innerHTML = `<img src="/badge/${esc(r.repo)}.svg${q}" alt="Hacker News badge"${style === "small" ? ' height="20"' : ""}>`;
     $("#badge-preview").classList.toggle("darkbg", style === "card-dark");
   };
@@ -514,7 +534,13 @@ function wireBadgeBox(r) {
     box.querySelectorAll("[data-bs]").forEach(x => x.classList.toggle("on", x === b));
     update();
   });
+  box.querySelectorAll("[data-fmt]").forEach(b => b.onclick = () => {
+    format = b.dataset.fmt;
+    box.querySelectorAll("[data-fmt]").forEach(x => x.classList.toggle("on", x === b));
+    update();
+  });
   $("#badge-hn").onchange = update;
+  $("#badge-center").onchange = update;
   const cb = $("#copy-badge");
   cb.onclick = async () => {
     const text = $("#badge-md").textContent;
