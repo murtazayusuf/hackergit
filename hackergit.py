@@ -86,6 +86,12 @@ CREATE TRIGGER IF NOT EXISTS readmes_au AFTER UPDATE OF text ON readmes BEGIN
   INSERT INTO readme_fts(readme_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
   INSERT INTO readme_fts(rowid, text) VALUES (new.rowid, new.text);
 END;
+-- Time series (recorded live from now on; HN keeps no history).
+CREATE TABLE IF NOT EXISTS rank_log (id INTEGER, list TEXT, t INTEGER, pos INTEGER);
+CREATE INDEX IF NOT EXISTS rank_log_id ON rank_log(id, t);
+CREATE TABLE IF NOT EXISTS points_log (id INTEGER, t INTEGER, points INTEGER, comments INTEGER);
+CREATE INDEX IF NOT EXISTS points_log_id ON points_log(id, t);
+CREATE TABLE IF NOT EXISTS stars_log (key TEXT, day TEXT, stars INTEGER, PRIMARY KEY (key, day));
 -- Live HN rankings, recorded by polling the official API (HN keeps no history of positions).
 -- list: 'front' (front page, /v0/topstories) or 'show' (Show HN page, /v0/showstories).
 CREATE TABLE IF NOT EXISTS ranks (
@@ -264,11 +270,13 @@ RANK_LISTS = {"front": "https://hacker-news.firebaseio.com/v0/topstories.json",
 
 def track_ranks(con, interval_min):
     """Record where every story sits on the front page and the Show HN page right now.
-    Keeps, per story and list: best position (and when), and minutes spent in the top 30 (page one)."""
+    Keeps, per story and list: best position (and when), and minutes spent in the top 30 (page one).
+    For GitHub posts it also logs the position and live points/comments, for trend lines."""
     now = int(time.time())
     last = int(meta_get(con, "ranks_last_poll", 0) or 0)
     # credit the time since the last poll, but never more than two intervals (e.g. after a restart)
     step = min(max(now - last, 0), interval_min * 120) / 60 if last else interval_min
+    gh_ids = set()
     for lst, url in RANK_LISTS.items():
         try:
             ids = http_json(url, retries=2, timeout=30) or []
@@ -284,9 +292,36 @@ def track_ranks(con, interval_min):
               last_seen = excluded.last_seen,
               minutes_top30 = ranks.minutes_top30 + excluded.minutes_top30,
               minutes_listed = ranks.minutes_listed + excluded.minutes_listed""", rows)
+        # positions of GitHub posts only (the ids we know)
+        known = {r[0] for r in con.execute(
+            f"SELECT id FROM stories WHERE id IN ({','.join('?' * len(ids))})", ids)} if ids else set()
+        con.executemany("INSERT INTO rank_log(id, list, t, pos) VALUES (?,?,?,?)",
+                        [(sid, lst, now, pos) for pos, sid in enumerate(ids, 1) if sid in known])
+        gh_ids |= known
+    # live points / comments for GitHub posts currently on a list
+    if gh_ids:
+        def item(i):
+            try:
+                return http_json(f"https://hacker-news.firebaseio.com/v0/item/{i}.json", retries=2, timeout=20)
+            except Exception:
+                return None
+        with ThreadPoolExecutor(12) as ex:
+            items = [x for x in ex.map(item, sorted(gh_ids)) if x and x.get("id")]
+        con.executemany("INSERT INTO points_log(id, t, points, comments) VALUES (?,?,?,?)",
+                        [(x["id"], now, x.get("score") or 0, x.get("descendants") or 0) for x in items])
+        con.executemany("UPDATE stories SET points = max(points, ?), comments = max(comments, ?) WHERE id = ?",
+                        [(x.get("score") or 0, x.get("descendants") or 0, x["id"]) for x in items])
     meta_set(con, "ranks_last_poll", now)
     if not meta_get(con, "ranks_since"):
         meta_set(con, "ranks_since", now)
+    # once a day: thin time series older than 7 days to one row per hour
+    if int(meta_get(con, "series_pruned", 0) or 0) < now - 86400:
+        cutoff = now - 7 * 86400
+        con.execute("""DELETE FROM rank_log WHERE t < ? AND rowid NOT IN
+            (SELECT min(rowid) FROM rank_log WHERE t < ? GROUP BY id, list, t / 3600)""", (cutoff, cutoff))
+        con.execute("""DELETE FROM points_log WHERE t < ? AND rowid NOT IN
+            (SELECT min(rowid) FROM points_log WHERE t < ? GROUP BY id, t / 3600)""", (cutoff, cutoff))
+        meta_set(con, "series_pruned", now)
     con.commit()
 
 
@@ -342,8 +377,9 @@ def refresh_github(con, limit=25000, stale_days=14):
     now = int(time.time())
     keys = [r[0] for r in con.execute("""
         SELECT r.key FROM repos r LEFT JOIN github g ON g.key=r.key
-        WHERE g.key IS NULL OR g.fetched < ? ORDER BY g.fetched IS NOT NULL, r.points DESC LIMIT ?""",
-        (now - stale_days * 86400, limit))]
+        WHERE g.key IS NULL OR g.fetched < ? OR (r.last_time > ? AND g.fetched < ?)
+        ORDER BY g.fetched IS NOT NULL, r.points DESC LIMIT ?""",
+        (now - stale_days * 86400, now - 30 * 86400, now - 86400, limit))]
     done = 0
     for i in range(0, len(keys), 80):
         chunk = keys[i:i + 80]
@@ -377,6 +413,9 @@ def refresh_github(con, limit=25000, stale_days=14):
             else:
                 rows.append((k, None, None, None, None, 1, now))
         con.executemany("INSERT OR REPLACE INTO github(key,stars,lang,descr,archived,missing,fetched) VALUES(?,?,?,?,?,?,?)", rows)
+        day = time.strftime("%Y-%m-%d", time.gmtime(now))
+        con.executemany("INSERT OR REPLACE INTO stars_log(key, day, stars) VALUES (?,?,?)",
+                        [(r[0], day, r[1]) for r in rows if r[1] is not None])
         con.commit()
         done += len(rows)
         time.sleep(0.5)
