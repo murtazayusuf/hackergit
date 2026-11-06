@@ -230,6 +230,22 @@ def series(key):
     return out
 
 
+def suggest(q):
+    """Type-ahead: repos whose owner/name or name starts with q, and HN users whose name starts with q."""
+    q = q.strip().lower().lstrip("@")
+    if len(q) < 2 or len(q) > 80:
+        return {"repos": [], "users": []}
+    hi = q + "\uffff"
+    con = db()
+    repos = con.execute("""SELECT repo, points, stars FROM (
+            SELECT key, repo, points, stars FROM repos WHERE key >= ? AND key < ?
+            UNION SELECT key, repo, points, stars FROM repos WHERE lower(name) >= ? AND lower(name) < ?)
+        ORDER BY points DESC LIMIT 6""", (q, hi, q, hi)).fetchall()
+    users = con.execute("""SELECT name, karma FROM users WHERE lower(name) >= ? AND lower(name) < ? AND karma > 0
+        ORDER BY karma DESC LIMIT 3""", (q, hi)).fetchall() if "/" not in q else []
+    return {"repos": [dict(r) for r in repos], "users": [dict(u) for u in users]}
+
+
 TRENDING = {"day": 86400, "week": 7 * 86400, "month": 30 * 86400}
 
 
@@ -735,6 +751,8 @@ def api(path, p):
         return repo_detail((p.get("key") or [""])[0])
     if path == "/api/user":
         return user_detail((p.get("name") or [""])[0])
+    if path == "/api/suggest":
+        return suggest((p.get("q") or [""])[0])
     if path == "/api/series":
         return series((p.get("key") or [""])[0])
     if path == "/api/trending":

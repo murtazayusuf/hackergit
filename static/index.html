@@ -58,6 +58,13 @@
   .search { flex: 1; display: flex; align-items: center; max-width: 560px; min-width: 0; margin-left: auto; height: 38px;
             border: 1px solid var(--line); border-radius: 8px; background: var(--bg2); padding: 0 10px; gap: 8px; }
   .search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .search { position: relative; }
+  .sugg { position: absolute; top: calc(100% + 6px); left: 0; right: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.14); padding: 6px; z-index: 20; }
+  .sugg-h { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; padding: 6px 8px 2px; }
+  .sugg a { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; font-size: 13.5px; }
+  .sugg a.on, .sugg a:hover { background: var(--bg2); }
+  .sugg .m { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .sugg .av { width: 18px; height: 18px; }
   .search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; height: 100%; }
   .search kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; color: var(--muted); }
   .nav-link { font-size: 14px; font-weight: 600; color: var(--muted); padding: 0 4px; flex: none; }
@@ -263,6 +270,7 @@
       <svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M10.68 11.74a6 6 0 1 1 1.06-1.06l3.04 3.04a.75.75 0 1 1-1.06 1.06l-3.04-3.04ZM11.5 7a4.5 4.5 0 1 0-9 0 4.5 4.5 0 0 0 9 0Z"/></svg>
       <input id="q" type="search" placeholder="Search repos, titles…  try  by:karpathy  owner:rust-lang  lang:go" autocomplete="off" aria-label="Search">
       <kbd>/</kbd>
+      <div class="sugg" id="sugg" role="listbox" hidden></div>
     </form>
     <a class="nav-link" href="/trending">Trending</a>
     <a class="gh-btn" href="https://github.com/murtazayusuf/hackergit" target="_blank" rel="noopener" aria-label="HackerGit on GitHub" title="HackerGit on GitHub">
@@ -1098,6 +1106,45 @@ document.addEventListener("click", (e) => {
   e.preventDefault(); go(a.pathname + a.search);
 });
 window.addEventListener("popstate", route);
+// ---------------------------------------------------------------- search suggestions
+(() => {
+  const input = $("#q"), box = $("#sugg");
+  let timer = 0, items = [], active = -1, lastQ = "";
+  const close = () => { box.hidden = true; active = -1; };
+  const highlight = () => items.forEach((a, i) => a.classList.toggle("on", i === active));
+  const render = (q, d) => {
+    if (input.value.trim() !== q) return;
+    box.replaceChildren(); items = []; active = -1;
+    const section = (title) => { const h = document.createElement("div"); h.className = "sugg-h"; h.textContent = title; box.append(h); };
+    const row = (href, iconOwner, text, meta) => {
+      const a = document.createElement("a"); a.href = href; a.setAttribute("role", "option");
+      if (iconOwner) a.insertAdjacentHTML("afterbegin", avatar(iconOwner, 18));
+      const t = document.createElement("span"); t.className = "mono"; t.textContent = text;
+      const m = document.createElement("span"); m.className = "m"; m.textContent = meta;
+      a.append(t, m); a.addEventListener("mousedown", (e) => e.preventDefault());
+      a.addEventListener("click", (e) => { e.preventDefault(); close(); input.blur(); go(href); });
+      box.append(a); items.push(a);
+    };
+    if (d.repos.length) { section("Repos"); d.repos.forEach(r => row(`/r/${r.repo}`, r.repo.split("/")[0], r.repo, `${fmt(r.points)} pts`)); }
+    if (d.users.length) { section("HN users"); d.users.forEach(u => row(`/u/${encodeURIComponent(u.name)}`, null, u.name, `${short(u.karma)} karma`)); }
+    box.hidden = !items.length;
+  };
+  input.addEventListener("input", () => {
+    clearTimeout(timer);
+    const q = input.value.trim();
+    if (q.length < 2 || /\s|:/.test(q)) { close(); return; }  // words and by:/owner: filters go to full search
+    timer = setTimeout(() => { lastQ = q; api(`/api/suggest?q=${encodeURIComponent(q)}`).then(d => render(q, d)).catch(close); }, 150);
+  });
+  input.addEventListener("keydown", (e) => {
+    if (box.hidden) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); active = (active + 1) % items.length; highlight(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); active = (active - 1 + items.length) % items.length; highlight(); }
+    else if (e.key === "Escape") { close(); }
+    else if (e.key === "Enter" && active >= 0) { e.preventDefault(); items[active].click(); }
+  });
+  input.addEventListener("blur", () => setTimeout(close, 100));
+})();
+
 $("#search-form").onsubmit = (e) => {
   e.preventDefault();
   const s = location.pathname === "/" ? readState() : { ...DEFAULTS };

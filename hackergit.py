@@ -119,6 +119,8 @@ CREATE INDEX IF NOT EXISTS repos_last ON repos(last_time);
 CREATE INDEX IF NOT EXISTS repos_stars ON repos(stars);
 CREATE INDEX IF NOT EXISTS repos_subs ON repos(subs);
 CREATE INDEX IF NOT EXISTS repos_show_points ON repos(show_points);
+CREATE INDEX IF NOT EXISTS repos_name ON repos(lower(name));
+CREATE INDEX IF NOT EXISTS users_lname ON users(lower(name));
 CREATE VIRTUAL TABLE IF NOT EXISTS repos_fts USING fts5(key UNINDEXED, repo, titles, descr, tokenize='unicode61 tokenchars ''-_''');
 CREATE VIRTUAL TABLE IF NOT EXISTS stories_fts USING fts5(title, repo, content='stories', content_rowid='id', tokenize='unicode61 tokenchars ''-_''');
 CREATE TRIGGER IF NOT EXISTS stories_ai AFTER INSERT ON stories BEGIN
