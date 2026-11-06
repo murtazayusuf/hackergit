@@ -712,6 +712,9 @@ async function renderAbout() {
         refreshed weekly.</li>
       <li><b>Stars, language and descriptions</b> come from the GitHub API, when enabled.</li>
       <li>New posts are picked up every few minutes, and points and comment counts keep updating for a few days after a post.</li>
+      <li><b>Rankings</b>: Hacker News doesn't keep a history of where posts ranked, so HackerGit records the front page and the
+        Show HN page every 2 minutes${st && st.ranks_since ? `, starting ${date(st.ranks_since)}` : ""}. Repo pages show each post's best
+        position and how long it stayed on page one. Posts from before then show points and comments only.</li>
       <li>Links to a file or folder inside a repo count for that repo. The same repo posted several times shows up once under
         <i>Repos</i>, with every post listed; <i>HN posts</i> shows each post separately.</li>
     </ul>
