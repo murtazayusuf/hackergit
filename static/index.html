@@ -112,6 +112,36 @@
   .stat { border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; min-width: 120px; background: var(--bg2); }
   .stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
   .stat span { color: var(--muted); font-size: 12px; }
+  .repohead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .repohead h1 { margin-right: auto; }
+  .repostats { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 13.5px; margin: 10px 0 6px; align-items: center; }
+  .repostats b { color: var(--text); font-variant-numeric: tabular-nums; }
+  h2.sect { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin: 26px 0 10px; }
+  .postcards { display: flex; flex-direction: column; gap: 12px; }
+  .postcard { display: grid; grid-template-columns: 78px 1fr; gap: 16px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
+  .postcard.top { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .pts-box { align-self: start; text-align: center; border-radius: 10px; background: var(--accent-soft); color: var(--accent); padding: 10px 4px; }
+  .pts-box b { display: block; font-size: 21px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .pts-box span { font-size: 11px; font-weight: 600; }
+  .pc-flag { font-size: 11px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 2px; }
+  .pc-body { min-width: 0; }
+  .pc-body .meta .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+  .postcard h3 { overflow-wrap: anywhere; margin: 0 0 4px; font-size: 17px; line-height: 1.35; }
+  .postcard h3 a:hover { text-decoration: underline; }
+  .postcard .meta { margin-top: 2px; }
+  .discuss { max-width: 100%; display: inline-block; margin-top: 10px; padding: 6px 12px; border-radius: 8px; background: var(--bg2); border: 1px solid var(--line); font-size: 13px; font-weight: 600; color: var(--link); }
+  .discuss:hover { background: var(--bg3); }
+  .badgedetails { margin-top: 32px; border: 1px solid var(--line); border-radius: 10px; }
+  .badgedetails summary { cursor: pointer; padding: 12px 16px; font-weight: 600; font-size: 14px; list-style: none; display: flex; align-items: center; gap: 8px; }
+  .badgedetails summary::-webkit-details-marker { display: none; }
+  .badgedetails summary::before { content: "▸"; color: var(--muted); transition: transform .15s; }
+  .badgedetails[open] summary::before { transform: rotate(90deg); }
+  .badgedetails .badgebox { margin: 0 12px 12px; }
+  @media (max-width: 640px) {
+    .postcard { grid-template-columns: 58px 1fr; gap: 12px; padding: 14px; }
+    .pts-box b { font-size: 17px; }
+    .postcard h3 { font-size: 15.5px; }
+  }
   .badgebox { margin: 18px 0 8px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg2); }
   .badgehead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
   .badgecode { display: flex; gap: 10px; align-items: center; }
@@ -435,6 +465,27 @@ view.addEventListener("click", async (e) => {
 });
 
 // ---------------------------------------------------------------- repo + user pages
+const POSTS_SHOWN = 20;
+function postCards(posts, limit = POSTS_SHOWN) {
+  const sorted = [...posts].sort((a, b) => b.points - a.points || b.time - a.time);
+  return `<div class="postcards">${sorted.slice(0, limit).map((p, i) => {
+    const path = (p.url || "").replace(/^https?:\/\/(www\.)?github\.com\/[^/]+\/[^/#?]+/i, "");
+    return `<article class="postcard${i === 0 && posts.length > 1 ? " top" : ""}">
+      <div class="pts-box"><b>${fmt(p.points)}</b><span>points</span></div>
+      <div class="pc-body">
+        ${i === 0 && posts.length > 1 ? `<div class="pc-flag">Top post</div>` : ""}
+        <h3><a href="${hn(p.id)}" target="_blank" rel="noopener">${esc(p.title)}</a></h3>
+        <div class="meta">
+          <span>by ${userLink(p.author, p.karma)}</span>
+          <span>${date(p.time)}</span>
+          ${path && path !== "/" ? `<span class="mono" title="Linked page">${esc(path.length > 48 ? path.slice(0, 45) + "…" : path)}</span>` : ""}
+        </div>
+        <a class="discuss" href="${hn(p.id)}" target="_blank" rel="noopener">${p.comments ? `Read the ${fmt(p.comments)} comment${p.comments === 1 ? "" : "s"} on Hacker News` : "Open on Hacker News"} →</a>
+      </div>
+    </article>`;
+  }).join("")}</div>${sorted.length > limit ? `<button class="loadmore" id="all-posts">Show all ${fmt(sorted.length)} posts</button>` : ""}`;
+}
+
 async function renderRepo(key) {
   const token = ++navToken;
   busy(true);
@@ -446,19 +497,27 @@ async function renderRepo(key) {
   document.title = `${r.repo} on Hacker News - HackerGit`;
   view.innerHTML = `<div class="page">
     <div class="crumb"><a href="/">HackerGit</a> / <a href="/?q=owner:${encodeURIComponent(r.owner)}">${esc(r.owner)}</a></div>
-    <h1 class="mono">${esc(r.repo)}</h1>
-    ${r.descr ? `<p class="descr" style="font-size:15px">${esc(r.descr)}</p>` : ""}
-    <div class="stats">
-      <div class="stat"><b>${fmt(r.points)}</b><span>best points</span></div>
-      <div class="stat"><b>${fmt(r.comments)}</b><span>comments (all posts)</span></div>
-      <div class="stat"><b>${fmt(r.subs)}</b><span>HN posts</span></div>
-      ${r.stars != null ? `<div class="stat"><b>${fmt(r.stars)}</b><span>GitHub stars</span></div>` : ""}
+    <div class="repohead">
+      <h1 class="mono">${esc(r.repo)}</h1>
+      <a class="chip" href="https://github.com/${esc(r.repo)}" target="_blank" rel="noopener">GitHub ↗</a>
     </div>
-    <p><a href="https://github.com/${esc(r.repo)}" target="_blank" rel="noopener" style="color:var(--link)">Open on GitHub ↗</a></p>
-    ${badgeBox(r, "Badge for your README")}
-    <h2 style="font-size:16px;margin-top:24px">Every time it was posted to Hacker News</h2>
-    ${subsList(d.posts)}
+    ${r.descr ? `<p class="descr" style="font-size:15px;margin:4px 0 0">${esc(r.descr)}</p>` : ""}
+    <div class="repostats">
+      <span><b>${fmt(r.points)}</b> best points</span>
+      <span><b>${fmt(r.comments)}</b> comments</span>
+      <span><b>${fmt(r.subs)}</b> HN post${r.subs === 1 ? "" : "s"}</span>
+      ${r.stars != null ? `<span><b>${fmt(r.stars)}</b> stars</span>` : ""}
+      ${r.lang ? `<span><span class="dot" style="background:${LANG_COLORS[r.lang] || "#8b949e"}"></span>${esc(r.lang)}</span>` : ""}
+    </div>
+    <h2 class="sect">${r.subs === 1 ? "On Hacker News" : `On Hacker News, ${fmt(r.subs)} times`}</h2>
+    <div id="posts">${postCards(d.posts)}</div>
+    <details class="badgedetails">
+      <summary>Add a Hacker News badge to your README</summary>
+      ${badgeBox(r, "Style")}
+    </details>
   </div>`;
+  const all = $("#all-posts");
+  if (all) all.onclick = () => { $("#posts").innerHTML = postCards(d.posts, Infinity); };
   wireBadgeBox(r);
 }
 
