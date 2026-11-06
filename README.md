@@ -115,6 +115,13 @@ Show how your repo did on Hacker News. Replace `owner/repo` with yours:
 [![Hacker News](https://hackergit.org/badge/karpathy/nanoGPT.svg)](https://hackergit.org/r/karpathy/nanoGPT)
 
 Options: `?show=comments` or `?show=posts` for other numbers, `?label=HN` for a shorter label.
+
+There's also a larger card with points, comments and posts (`?style=card`, plus `&theme=dark` for dark READMEs):
+
+[![Hacker News](https://hackergit.org/badge/karpathy/nanoGPT.svg?style=card)](https://hackergit.org/r/karpathy/nanoGPT)
+
+Prefer to send readers straight to Hacker News? Point the link at your HN post instead
+(`https://news.ycombinator.com/item?id=...`); the badge picker on each repo page has a checkbox for this.
 It shows the best-scoring post and updates on its own. Every repo page on hackergit.org has a copy button.
 
 ## API

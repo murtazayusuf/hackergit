@@ -124,6 +124,14 @@
   .badgeform input { flex: 1 1 260px; min-width: 0; height: 38px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg2); padding: 0 12px; outline: 0; }
   .badgeform input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   .badgehint a { color: var(--link); }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-left: auto; }
+  .seg button { padding: 4px 12px; color: var(--muted); font-size: 13px; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button.on { background: var(--chip-on); color: var(--chip-on-text); }
+  .badgepreview { padding: 14px; border: 1px dashed var(--line); border-radius: 8px; margin-bottom: 10px; background: #ffffff; }
+  .badgepreview.darkbg { background: #0d1117; }
+  .badgepreview img { display: block; max-width: 100%; }
+  .badgelink { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-top: 10px; cursor: pointer; }
   .badgehint code { font: 12px ui-monospace, monospace; }
   .about { max-width: 720px; font-size: 15px; line-height: 1.65; }
   .about h2 { font-size: 18px; margin: 28px 0 6px; }
@@ -442,22 +450,11 @@ async function renderRepo(key) {
       ${r.stars != null ? `<div class="stat"><b>${fmt(r.stars)}</b><span>GitHub stars</span></div>` : ""}
     </div>
     <p><a href="https://github.com/${esc(r.repo)}" target="_blank" rel="noopener" style="color:var(--link)">Open on GitHub ↗</a></p>
-    <div class="badgebox">
-      <div class="badgehead"><b>Badge for your README</b><img src="/badge/${esc(r.repo)}.svg" alt="Hacker News badge" height="20"></div>
-      <div class="badgecode"><code class="mono" id="badge-md">[![Hacker News](https://hackergit.org/badge/${esc(r.repo)}.svg)](https://hackergit.org/r/${esc(r.repo)})</code>
-        <button class="chip" id="copy-badge">Copy</button></div>
-      <div class="badgehint">Shows the best points. Add <code>?show=comments</code> or <code>?show=posts</code> to the image link for other numbers. It updates by itself.</div>
-    </div>
+    ${badgeBox(r, "Badge for your README")}
     <h2 style="font-size:16px;margin-top:24px">Every time it was posted to Hacker News</h2>
     ${subsList(d.posts)}
   </div>`;
-  const cb = $("#copy-badge");
-  if (cb) cb.onclick = async () => {
-    const text = $("#badge-md").textContent;
-    try { await navigator.clipboard.writeText(text); cb.textContent = "Copied"; }
-    catch { const rg = document.createRange(); rg.selectNodeContents($("#badge-md")); getSelection().removeAllRanges(); getSelection().addRange(rg); cb.textContent = "Press Ctrl/Cmd+C"; }
-    setTimeout(() => { cb.textContent = "Copy"; }, 1600);
-  };
+  wireBadgeBox(r);
 }
 
 async function renderUser(name) {
@@ -486,6 +483,48 @@ async function loadPageFor(s, page = 0) {
   else tail.innerHTML = "";
 }
 
+// Badge picker shared by repo pages and /badges: style + where the badge links to.
+function badgeBox(r, title) {
+  return `<div class="badgebox" id="badgebox">
+    <div class="badgehead"><b>${title}</b>
+      <div class="seg" role="group" aria-label="Badge style">
+        <button type="button" data-bs="small" class="on">Small</button><button type="button" data-bs="card">Card</button><button type="button" data-bs="card-dark">Card (dark)</button>
+      </div>
+    </div>
+    <div class="badgepreview" id="badge-preview"></div>
+    <div class="badgecode"><code class="mono" id="badge-md"></code><button class="chip" id="copy-badge" type="button">Copy</button></div>
+    <label class="badgelink"><input type="checkbox" id="badge-hn"> Link to the Hacker News post instead of HackerGit</label>
+    <div class="badgehint">${fmt(r.points)} points and ${fmt(r.comments)} comments across ${fmt(r.subs)} HN post${r.subs === 1 ? "" : "s"}. The badge updates by itself.</div>
+  </div>`;
+}
+function wireBadgeBox(r) {
+  const box = $("#badgebox");
+  if (!box) return;
+  let style = "small";
+  const update = () => {
+    const q = style === "small" ? "" : style === "card" ? "?style=card" : "?style=card&theme=dark";
+    const img = `https://hackergit.org/badge/${r.repo}.svg${q}`;
+    const href = $("#badge-hn").checked ? `https://news.ycombinator.com/item?id=${r.top_id}` : `https://hackergit.org/r/${r.repo}`;
+    $("#badge-md").textContent = `[![Hacker News](${img})](${href})`;
+    $("#badge-preview").innerHTML = `<img src="/badge/${esc(r.repo)}.svg${q}" alt="Hacker News badge"${style === "small" ? ' height="20"' : ""}>`;
+    $("#badge-preview").classList.toggle("darkbg", style === "card-dark");
+  };
+  box.querySelectorAll("[data-bs]").forEach(b => b.onclick = () => {
+    style = b.dataset.bs;
+    box.querySelectorAll("[data-bs]").forEach(x => x.classList.toggle("on", x === b));
+    update();
+  });
+  $("#badge-hn").onchange = update;
+  const cb = $("#copy-badge");
+  cb.onclick = async () => {
+    const text = $("#badge-md").textContent;
+    try { await navigator.clipboard.writeText(text); cb.textContent = "Copied"; }
+    catch { const rg = document.createRange(); rg.selectNodeContents($("#badge-md")); getSelection().removeAllRanges(); getSelection().addRange(rg); cb.textContent = "Press Ctrl/Cmd+C"; }
+    setTimeout(() => { cb.textContent = "Copy"; }, 1600);
+  };
+  update();
+}
+
 function parseRepoInput(t) {
   t = (t || "").trim().replace(/\.git$/, "").replace(/\/+$/, "");
   const m = t.match(/(?:github\.com\/)?([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)$/);
@@ -507,6 +546,8 @@ function renderBadges() {
     <ul>
       <li><code>?show=comments</code> or <code>?show=posts</code> on the image link shows other numbers.</li>
       <li><code>?label=HN</code> makes the label shorter.</li>
+      <li><code>?style=card</code> gives the larger card with points, comments and posts; add <code>&amp;theme=dark</code> for dark READMEs.</li>
+      <li>Prefer to send readers straight to Hacker News? Tick "Link to the Hacker News post" and the badge links to your top HN post.</li>
       <li>Repos never posted on HN get a gray "not posted yet" badge, so a README never shows a broken image.</li>
     </ul>
   </div>`;
@@ -515,20 +556,13 @@ function renderBadges() {
     history.replaceState({}, "", `/badges?repo=${encodeURIComponent(key)}`);
     out.innerHTML = `<div class="badgebox"><div class="badgehint">Looking up ${esc(key)}…</div></div>`;
     const d = await api(`/api/repo?key=${encodeURIComponent(key)}`).catch(() => null);
-    const repo = d ? d.repo.repo : key;
-    const md = `[![Hacker News](https://hackergit.org/badge/${repo}.svg)](https://hackergit.org/r/${repo})`;
-    out.innerHTML = `<div class="badgebox">
-      <div class="badgehead"><b class="mono">${esc(repo)}</b><img src="/badge/${esc(repo)}.svg" alt="Hacker News badge" height="20"></div>
-      ${d ? `<div class="badgecode"><code class="mono" id="badge-md">${esc(md)}</code><button class="chip" id="copy-badge" type="button">Copy</button></div>
-      <div class="badgehint">${fmt(d.repo.points)} points and ${fmt(d.repo.comments)} comments across ${fmt(d.repo.subs)} HN post${d.repo.subs === 1 ? "" : "s"}. <a href="/r/${esc(repo)}">See them</a></div>`
-      : `<div class="badgehint">This repo hasn't been posted on Hacker News yet (as a link to its GitHub page). Check the spelling, or try again after it's been posted.</div>`}
-    </div>`;
-    const cb = $("#copy-badge");
-    if (cb) cb.onclick = async () => {
-      try { await navigator.clipboard.writeText(md); cb.textContent = "Copied"; }
-      catch { const rg = document.createRange(); rg.selectNodeContents($("#badge-md")); getSelection().removeAllRanges(); getSelection().addRange(rg); cb.textContent = "Press Ctrl/Cmd+C"; }
-      setTimeout(() => { cb.textContent = "Copy"; }, 1600);
-    };
+    if (!d) {
+      out.innerHTML = `<div class="badgebox"><div class="badgehead"><b class="mono">${esc(key)}</b><img src="/badge/${esc(key)}.svg" alt="" height="20"></div>
+        <div class="badgehint">This repo hasn't been posted on Hacker News yet (as a link to its GitHub page). Check the spelling, or try again after it's been posted.</div></div>`;
+      return;
+    }
+    out.innerHTML = badgeBox(d.repo, `<span class="mono">${esc(d.repo.repo)}</span> · <a href="/r/${esc(d.repo.repo)}">see its HN posts</a>`);
+    wireBadgeBox(d.repo);
   };
   $("#badge-form").onsubmit = (e) => {
     e.preventDefault();

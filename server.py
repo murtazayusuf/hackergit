@@ -346,6 +346,36 @@ def badge_svg(label, value, color="#ff6600"):
 """
 
 
+def _w(t, size, bold=False):
+    """Rough text width for sans-serif at a given size (kept generous so text never clips)."""
+    base = text_width(t) / 11.0 * size
+    return base * (1.12 if bold else 1.0)
+
+
+def badge_card(label, big, small, theme="light", muted=False):
+    """A larger card badge (white or dark), in the style of GitHub-trending / spotlight cards."""
+    dark = theme == "dark"
+    bg, fg, sub = ("#0d1117", "#e6edf3", "#9198a1") if dark else ("#ffffff", "#1f2328", "#59636e")
+    accent = "#9198a1" if muted else "#ff6600"
+    tx = 70
+    w = round(tx + max(_w(label, 11) * 1.15, _w(big, 21, True), _w(small, 12.5)) + 22)
+    w = max(w, 250)
+    h = 74
+    L, B, S = xml_esc(label), xml_esc(big), xml_esc(small)
+    font = "-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans',Helvetica,Arial,sans-serif"
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}" role="img" aria-label="{L}: {B}, {S}">
+<title>{L}: {B}, {S}</title>
+<rect x="1" y="1" width="{w - 2}" height="{h - 2}" rx="10" fill="{bg}" stroke="{accent}" stroke-width="2"/>
+<rect x="16" y="17" width="40" height="40" rx="8" fill="{accent}"/>
+<text x="36" y="46" fill="#fff" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="25" font-weight="bold" text-anchor="middle">Y</text>
+<g font-family="{font}">
+<text x="{tx}" y="25" fill="{accent}" font-size="11" font-weight="600" letter-spacing=".6">{L.upper()}</text>
+<text x="{tx}" y="47" fill="{fg}" font-size="21" font-weight="700">{B}</text>
+<text x="{tx}" y="64" fill="{sub}" font-size="12.5">{S}</text>
+</g></svg>
+"""
+
+
 def badge(path, query):
     """/badge/<owner>/<repo>.svg?show=points|comments|posts&label=..."""
     m = re.fullmatch(r"/badge/([A-Za-z0-9-]+)/([A-Za-z0-9._-]+?)(?:\.svg)?", path)
@@ -356,6 +386,13 @@ def badge(path, query):
     label = ((p.get("label") or ["Hacker News"])[0] or "Hacker News")[:40]
     key = f"{m.group(1)}/{m.group(2)}".lower()
     r = db().execute("SELECT points, comments, subs FROM repos WHERE key = ?", (key,)).fetchone()
+    if (p.get("style") or [""])[0] == "card":
+        theme = (p.get("theme") or ["light"])[0]
+        if not r:
+            return badge_card(label, "Not posted yet", "No Hacker News posts found", theme, muted=True)
+        plural = lambda n, w: f"{n:,} {w}{'s' if n != 1 else ''}"
+        return badge_card(label, plural(r["points"], "point"),
+                          f"{plural(r['comments'], 'comment')} \u00b7 {plural(r['subs'], 'HN post')}", theme)
     if not r:
         return badge_svg(label, "not posted yet", "#9f9f9f")
     if show == "comments":
