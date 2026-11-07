@@ -86,6 +86,14 @@ CREATE TRIGGER IF NOT EXISTS readmes_au AFTER UPDATE OF text ON readmes BEGIN
   INSERT INTO readme_fts(readme_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
   INSERT INTO readme_fts(rowid, text) VALUES (new.rowid, new.text);
 END;
+-- Tiny rowid -> repo map so README search hits don't have to read the (large) README rows.
+CREATE TABLE IF NOT EXISTS readme_map (rid INTEGER PRIMARY KEY, key TEXT);
+CREATE TRIGGER IF NOT EXISTS readmes_map_ai AFTER INSERT ON readmes BEGIN
+  INSERT OR REPLACE INTO readme_map(rid, key) VALUES (new.rowid, new.key);
+END;
+CREATE TRIGGER IF NOT EXISTS readmes_map_ad AFTER DELETE ON readmes BEGIN
+  DELETE FROM readme_map WHERE rid = old.rowid;
+END;
 -- Time series (recorded live from now on; HN keeps no history).
 CREATE TABLE IF NOT EXISTS rank_log (id INTEGER, list TEXT, t INTEGER, pos INTEGER);
 CREATE INDEX IF NOT EXISTS rank_log_id ON rank_log(id, t);
@@ -140,6 +148,7 @@ def connect(readonly=False):
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     if readonly:
         con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, check_same_thread=False, timeout=30)
+        con.execute("PRAGMA cache_size = -8000")       # ~8 MB page cache per connection
     else:
         con = sqlite3.connect(DB_PATH, timeout=60)
         cols = {r[1] for r in con.execute("PRAGMA table_info(repos)")}
@@ -147,6 +156,9 @@ def connect(readonly=False):
         if migrate:
             con.execute("DROP TABLE repos")
         con.executescript(SCHEMA)
+        if con.execute("SELECT (SELECT count(*) FROM readme_map) < (SELECT count(*) FROM readmes)").fetchone()[0]:
+            con.execute("INSERT OR REPLACE INTO readme_map(rid, key) SELECT rowid, key FROM readmes")
+            con.commit()
         if migrate:
             con.row_factory = sqlite3.Row
             rebuild(con)

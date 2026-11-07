@@ -12,6 +12,7 @@ Env vars:
 import gzip
 import json
 import os
+import queue
 import re
 import threading
 import time
@@ -37,11 +38,30 @@ _version = {"v": None, "checked": 0.0}
 CACHE_MAX = 5000
 
 
+# Request threads are short-lived, so read connections are pooled and reused (warm caches) instead of
+# being opened per request.
+_pool = queue.LifoQueue()
+
+
 def db():
     con = getattr(_local, "con", None)
     if con is None:
-        con = _local.con = hg.connect(readonly=True)
+        try:
+            con = _pool.get_nowait()
+        except queue.Empty:
+            con = hg.connect(readonly=True)
+        _local.con = con
     return con
+
+
+def release_db():
+    con = getattr(_local, "con", None)
+    if con is not None:
+        _local.con = None
+        if _pool.qsize() < 64:
+            _pool.put(con)
+        else:
+            con.close()
 
 
 # ---------------------------------------------------------------- query building
@@ -111,6 +131,7 @@ def search(p):
     show = view != "posts" and kind == "show"  # rank and display repos by their best Show HN post
 
     where, args = [], []
+    repo_from, match_args = "repos r", []
     if view == "posts":
         t, kc = "s", "karma"
         if match:
@@ -121,14 +142,14 @@ def search(p):
     else:
         t = "r"
         if match:
-            if (p.get("readme") or ["1"])[0] == "0":
-                where.append("r.key IN (SELECT key FROM repos_fts WHERE repos_fts MATCH ?)")
-                args.append(match)
-            else:  # also match README text
-                where.append("""(r.key IN (SELECT key FROM repos_fts WHERE repos_fts MATCH ?)
-                    OR r.key IN (SELECT m.key FROM readmes m WHERE m.rowid IN
-                                 (SELECT rowid FROM readme_fts WHERE readme_fts MATCH ?)))""")
-                args += [match, match]
+            # Collect the matching repos first (both search indexes), then filter/sort just those.
+            # CROSS JOIN makes SQLite start from the (usually small) match set instead of all repos.
+            mk = "SELECT key FROM repos_fts WHERE repos_fts MATCH ?"
+            match_args = [match]
+            if (p.get("readme") or ["1"])[0] != "0":  # also match README text
+                mk += " UNION SELECT m.key FROM readme_fts f JOIN readme_map m ON m.rid = f.rowid WHERE readme_fts MATCH ?"
+                match_args.append(match)
+            repo_from = f"({mk}) AS mk CROSS JOIN repos r ON r.key = mk.key"
         cols = {"points": "r.points", "comments": "r.comments", "karma": "r.karma",
                 "stars": "r.stars", "time_from": "r.last_time", "time_to": "r.first_time"}
         if show:
@@ -193,9 +214,9 @@ def search(p):
             # small sets: rank by the matching post itself
             order = (f"(SELECT max({sort}) FROM stories s WHERE lower(s.repo) = r.key AND s.title LIKE ?) DESC")
             order_args = [KINDS[kind] + "%"]
-        total = con.execute(f"SELECT count(*) FROM repos r {w}", args).fetchone()[0]
-        rows = con.execute(f"""SELECT r.* FROM repos r {w} ORDER BY {order}, r.key
-                LIMIT ? OFFSET ?""", args + order_args + [PAGE_SIZE, page * PAGE_SIZE]).fetchall()
+        total = con.execute(f"SELECT count(*) FROM {repo_from} {w}", match_args + args).fetchone()[0]
+        rows = con.execute(f"""SELECT r.* FROM {repo_from} {w} ORDER BY {order}, r.key
+                LIMIT ? OFFSET ?""", match_args + args + order_args + [PAGE_SIZE, page * PAGE_SIZE]).fetchall()
         if kind in ("launch", "ask", "tell"):  # show the matching post, not the repo's overall top post
             out = []
             for x in rows:
@@ -798,6 +819,12 @@ class Handler(BaseHTTPRequestHandler):
         self.do_GET()
 
     def do_GET(self):
+        try:
+            self._get()
+        finally:
+            release_db()
+
+    def _get(self):
         u = urlparse(self.path)
         try:
             if u.path.startswith("/api/"):
@@ -877,6 +904,7 @@ def main():
     if rank_minutes > 0:
         threading.Thread(target=rank_tracker, args=(rank_minutes,), daemon=True).start()
     host = os.environ.get("HOST", "0.0.0.0")
+    ThreadingHTTPServer.request_queue_size = 1024  # default is 5: bursts got delayed ~1 s by connection retries
     srv = ThreadingHTTPServer((host, port), Handler)
     srv.daemon_threads = True
     hg.log(f"HackerGit on http://{host}:{port}  db={hg.DB_PATH}")
