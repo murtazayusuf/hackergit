@@ -11,6 +11,7 @@ Env vars:
 """
 import gzip
 import json
+import math
 import os
 import queue
 import re
@@ -684,24 +685,45 @@ def repo_rankings(con, r):
     return out
 
 
+def _laurel(cx, cy, r, color, n=4, start=26, end=146, spread=34, L=7.4, w=3.0):
+    """A laurel wreath around (cx, cy), open at the top: the left branch plus its mirror image."""
+    leaf = lambda x, y, ang, k: (f'<path d="M0 0Q{L * k / 2:.1f} {-w * k:.1f} {L * k:.1f} 0Q{L * k / 2:.1f} {w * k:.1f} 0 0Z" '
+                                 f'transform="translate({x:.1f} {y:.1f}) rotate({ang:.0f})"/>')
+    at = lambda f: (cx - r * math.sin(f), cy + r * math.cos(f))
+    tangent = lambda f: math.degrees(math.atan2(-math.sin(f), -math.cos(f)))
+    a, b = math.radians(start), math.radians(end)
+    (x0, y0), (x1, y1) = at(a), at(b)
+    parts = [f'<path d="M{x0:.1f} {y0:.1f}A{r} {r} 0 0 1 {x1:.1f} {y1:.1f}" fill="none" stroke="{color}" '
+             f'stroke-width="1.3" stroke-linecap="round"/>']
+    for i in range(n):
+        f = a + (b - a) * (i + 0.5) / n
+        x, y = at(f)
+        k = 1 - 0.07 * i
+        parts += [leaf(x, y, tangent(f) - spread, k), leaf(x, y, tangent(f) + spread, k)]
+    parts.append(leaf(x1, y1, tangent(b), 0.85))
+    branch = "".join(parts)
+    return (f'<g fill="{color}">{branch}<g transform="translate({2 * cx} 0) scale(-1 1)">{branch}</g></g>')
+
+
 def badge_card(label, big, small, theme="light", muted=False):
     """A 250x55 card badge (the size Trendshift and similar README cards use); wider only if the text needs it."""
     dark = theme == "dark"
     bg, fg, sub = ("#0d1117", "#e6edf3", "#9198a1") if dark else ("#ffffff", "#1f2328", "#59636e")
     accent = "#9198a1" if muted else "#ff6600"
-    tx, h, w = 57, 55, 250
+    tx, h, w = 62, 55, 250
     room = w - tx - 12
     # calibrated against browser rendering; shrink long text so the card stays 250 wide (like Trendshift's)
     big_fs = max(12.5, min(17.0, 17.0 * room / max(1, _w(big, 17, True) * 0.87)))
     small_fs = max(9.0, min(10.5, 10.5 * room / max(1, _w(small, 10.5) * 0.87)))
     L, B, S = xml_esc(label), xml_esc(big), xml_esc(small)
     font = "-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans',Helvetica,Arial,sans-serif"
-    icon_svg = ('<text x="28.5" y="35" fill="#fff" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" '
-                'font-size="21" font-weight="bold" text-anchor="middle">Y</text>')
+    icon_svg = (("" if muted else _laurel(30, 27.5, 19, accent))
+                + f'<rect x="21" y="18.5" width="18" height="18" rx="4" fill="{accent}"/>'
+                + '<text x="30" y="32" fill="#fff" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" '
+                'font-size="12.5" font-weight="bold" text-anchor="middle">Y</text>')
     return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}" role="img" aria-label="{L}: {B}, {S}">
 <title>{L}: {B}, {S}</title>
 <rect x="1" y="1" width="{w - 2}" height="{h - 2}" rx="9" fill="{bg}" stroke="{accent}" stroke-width="1.5"/>
-<rect x="12" y="11" width="33" height="33" rx="7" fill="{accent}"/>
 {icon_svg}
 <g font-family="{font}">
 <text x="{tx}" y="18.5" fill="{accent}" font-size="9.5" font-weight="600" letter-spacing=".6">{L.upper()}</text>
