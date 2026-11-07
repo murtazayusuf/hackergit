@@ -607,12 +607,16 @@ _MONTHS = ["January", "February", "March", "April", "May", "June", "July", "Augu
            "November", "December"]
 
 
+def plural(n, w):
+    return f"{n:,} {w}{'s' if n != 1 else ''}"
+
+
 def _nice_date(d):
     y, m, dd = (d.split("-") + ["", ""])[:3]
     return f"{_MONTHS[int(m) - 1][:3]} {int(dd)}, {y}" if dd else f"{_MONTHS[int(m) - 1]} {y}" if m else y
 
 
-def ach_label(r):
+def ach_label(r, comments=None):
     """('#1 Repo of the Day', 'Jan 11, 2023 · 1,532 points') for a repo's best achievement, or None."""
     if not r or r["ach_rank"] is None:
         return None
@@ -620,7 +624,7 @@ def ach_label(r):
     noun = "Show HN" if sc == "show" else "Repo"
     when = {"day": _nice_date(dt), "week": f"Week of {_nice_date(dt)}", "month": _nice_date(dt),
             "year": "", "live": _nice_date(dt)}.get(per, "")
-    small = f"{when} \u00b7 {pts:,} points" if when else f"{pts:,} points on Hacker News"
+    small = f"{when} \u00b7 {pts:,} points" if when else f"{pts:,} points" + (f" \u00b7 {plural(comments, 'comment')}" if comments is not None else "")
     if per == "live":
         return (f"#{rank} on the Front Page" if sc == "front" else f"#{rank} on Show HN"), small
     if per == "year":
@@ -655,14 +659,14 @@ def post_rankings(con, post, scope="all"):
     return out
 
 
-def ranking_label(per, scope, info, pts):
+def ranking_label(per, scope, info, pts, comments):
     """('#3 Repo of the Week', 'Week of Jan 9, 2023 · 474 points') for one ranking."""
     noun = "Show HN" if scope == "show" else "Repo"
     rank, start = info["rank"], info["start"]
     if per == "alltime":
-        return f"#{rank:,} {noun} of All Time", f"{pts:,} points on Hacker News"
+        return f"#{rank:,} {noun} of All Time", f"{pts:,} points \u00b7 {plural(comments, 'comment')}"
     if per == "year":
-        return f"#{rank:,} {noun} of {start[:4]}", f"{pts:,} points on Hacker News"
+        return f"#{rank:,} {noun} of {start[:4]}", f"{pts:,} points \u00b7 {plural(comments, 'comment')}"
     when = {"day": _nice_date(start), "week": f"Week of {_nice_date(start)}", "month": _nice_date(start[:7])}[per]
     return f"#{rank:,} {noun} of the {per.title()}", f"{when} · {pts:,} points"
 
@@ -680,7 +684,7 @@ def repo_rankings(con, r):
     return out
 
 
-def badge_card(label, big, small, theme="light", muted=False, icon=None):
+def badge_card(label, big, small, theme="light", muted=False):
     """A 250x55 card badge (the size Trendshift and similar README cards use); wider only if the text needs it."""
     dark = theme == "dark"
     bg, fg, sub = ("#0d1117", "#e6edf3", "#9198a1") if dark else ("#ffffff", "#1f2328", "#59636e")
@@ -692,13 +696,8 @@ def badge_card(label, big, small, theme="light", muted=False, icon=None):
     small_fs = max(9.0, min(10.5, 10.5 * room / max(1, _w(small, 10.5) * 0.87)))
     L, B, S = xml_esc(label), xml_esc(big), xml_esc(small)
     font = "-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans',Helvetica,Arial,sans-serif"
-    if icon:  # e.g. "#1": rank inside the icon, like a medal
-        fs = 15 if len(icon) <= 2 else 12
-        icon_svg = (f'<text x="28.5" y="{27.5 + fs * 0.36:.1f}" fill="#fff" font-family="{font}" font-size="{fs}" '
-                    f'font-weight="800" text-anchor="middle">{xml_esc(icon)}</text>')
-    else:
-        icon_svg = ('<text x="28.5" y="35" fill="#fff" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" '
-                    'font-size="21" font-weight="bold" text-anchor="middle">Y</text>')
+    icon_svg = ('<text x="28.5" y="35" fill="#fff" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" '
+                'font-size="21" font-weight="bold" text-anchor="middle">Y</text>')
     return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}" role="img" aria-label="{L}: {B}, {S}">
 <title>{L}: {B}, {S}</title>
 <rect x="1" y="1" width="{w - 2}" height="{h - 2}" rx="9" fill="{bg}" stroke="{accent}" stroke-width="1.5"/>
@@ -729,20 +728,20 @@ def badge(path, query):
         scope = "show" if (p.get("scope") or [""])[0] == "show" else "all"
         if r and per in RANK_PERIODS:  # a specific ranking, e.g. ?rank=week or ?rank=alltime&scope=show
             pid = r["show_id"] if scope == "show" else r["top_id"]
-            post = db().execute("SELECT id, time, points FROM stories WHERE id = ?", (pid,)).fetchone() if pid else None
+            post = db().execute("SELECT id, time, points, comments FROM stories WHERE id = ?", (pid,)).fetchone() if pid else None
             if post:
                 info = post_rankings(db(), post, scope)[per]
-                big, small = ranking_label(per, scope, info, post["points"])
-                return badge_card(label, big, small, theme, icon=f"#{info['rank']}" if info["rank"] <= 99 else None)
-        lab = ach_label(r)
+                big, small = ranking_label(per, scope, info, post["points"], post["comments"])
+                return badge_card(label, big, small, theme)
+        ach = db().execute("SELECT comments FROM stories WHERE id = ?", (r["ach_id"],)).fetchone() if r and r["ach_id"] else None
+        lab = ach_label(r, ach["comments"] if ach else None)
         if lab:
-            return badge_card(label, lab[0], lab[1], theme, icon=f"#{r['ach_rank']}")
+            return badge_card(label, lab[0], lab[1], theme)
         style = "card"  # no ranking: fall back to the points card
     if style == "card":
         theme = (p.get("theme") or ["light"])[0]
         if not r:
             return badge_card(label, "Not posted yet", "No Hacker News posts found", theme, muted=True)
-        plural = lambda n, w: f"{n:,} {w}{'s' if n != 1 else ''}"
         return badge_card(label, plural(r["points"], "point"),
                           f"{plural(r['comments'], 'comment')} \u00b7 {plural(r['subs'], 'HN post')}", theme)
     if not r:
