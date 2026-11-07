@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS github (
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
 -- Cleaned README text per repo, with its own search index kept up to date incrementally (never rebuilt).
 CREATE TABLE IF NOT EXISTS readmes (key TEXT PRIMARY KEY, text TEXT, fetched INTEGER, missing INTEGER DEFAULT 0);
+CREATE INDEX IF NOT EXISTS readmes_missing ON readmes(missing);  -- counts without reading README text
 CREATE VIRTUAL TABLE IF NOT EXISTS readme_fts USING fts5(text, content='readmes', content_rowid='rowid', tokenize='unicode61 tokenchars ''-_''');
 CREATE TRIGGER IF NOT EXISTS readmes_ai AFTER INSERT ON readmes BEGIN
   INSERT INTO readme_fts(rowid, text) VALUES (new.rowid, new.text);
