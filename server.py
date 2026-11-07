@@ -848,7 +848,7 @@ class Handler(BaseHTTPRequestHandler):
                 body = cached("badge:" + u.path + "?" + u.query, lambda: badge(u.path, u.query) or "")
                 if not body:
                     return self.send(404, "not found", "text/plain")
-                return self.send(200, body, "image/svg+xml; charset=utf-8", "public, max-age=3600")
+                return self.send(200, body, "image/svg+xml; charset=utf-8", "public, max-age=300")
             if u.path in STATIC_FILES:
                 fname, ctype = STATIC_FILES[u.path]
                 with open(os.path.join(ROOT, "static", fname), "rb") as fh:
