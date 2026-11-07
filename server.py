@@ -741,9 +741,9 @@ def badge(path, query):
     if style == "card":
         theme = (p.get("theme") or ["light"])[0]
         if not r:
-            return badge_card(label, "Not posted yet", "No Hacker News posts found", theme, muted=True)
+            return badge_card(label, "Not posted yet", "No posts found", theme, muted=True)
         return badge_card(label, plural(r["points"], "point"),
-                          f"{plural(r['comments'], 'comment')} \u00b7 {plural(r['subs'], 'HN post')}", theme)
+                          f"{plural(r['comments'], 'comment')} \u00b7 {plural(r['subs'], 'post')}", theme)
     if not r:
         return badge_svg(label, "not posted yet", "#9f9f9f")
     if show == "comments":
