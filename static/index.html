@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HackerGit</title>
 <meta name="description" content="Every GitHub repo ever shared on Hacker News. Search and sort by points, comments and the poster's karma.">
+<link rel="preconnect" href="https://avatars.githubusercontent.com" crossorigin>
 <link rel="canonical" href="https://hackergit.org/">
 <meta property="og:site_name" content="HackerGit">
 <meta property="og:title" content="HackerGit">
@@ -510,12 +511,14 @@ function showPage(s, page, d, token) {
 }
 
 // Owner avatars load straight from GitHub in the browser (works for users and orgs); hidden if they fail.
-function avatar(owner, size) {
-  return `<img class="av" src="https://github.com/${encodeURIComponent(owner)}.png?size=${size * 2}" width="${size}" height="${size}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.style.visibility='hidden'">`;
+// Uses the direct avatar URL from GitHub's API when we have it (no redirect hop); otherwise github.com/<owner>.png.
+function avatar(owner, size, url) {
+  const src = url ? url.replace(/([?&])s=\d+/, `$1s=${size * 2}`) : `https://github.com/${encodeURIComponent(owner)}.png?size=${size * 2}`;
+  return `<img class="av" src="${esc(src)}" width="${size}" height="${size}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.style.visibility='hidden'">`;
 }
-function repoName(full, href) {
+function repoName(full, href, av) {
   const [o, n] = full.split("/");
-  return `<a class="repo mono" href="${href}">${avatar(o, 20)}<span class="own">${esc(o)} / </span>${esc(n)}</a>`;
+  return `<a class="repo mono" href="${href}">${avatar(o, 20, av)}<span class="own">${esc(o)} / </span>${esc(n)}</a>`;
 }
 function ghMeta(r) {
   const bits = [];
@@ -527,7 +530,7 @@ const userLink = (name, karma) => `<a href="/u/${encodeURIComponent(name)}">${es
 
 function repoItem(r, n) {
   return `<li class="item"><div class="rank">${n}.</div><div>
-    <div class="head">${repoName(r.repo, `/r/${esc(r.repo)}`)}${ghMeta(r)}</div>
+    <div class="head">${repoName(r.repo, `/r/${esc(r.repo)}`, r.avatar)}${ghMeta(r)}</div>
     <div class="title"><a href="${hn(r.top_id)}" target="_blank" rel="noopener">${esc(r.top_title)}</a></div>
     ${r.descr ? `<div class="descr">${esc(r.descr)}</div>` : ""}
     <div class="meta">
@@ -543,7 +546,7 @@ function repoItem(r, n) {
 function postItem(r, n) {
   return `<li class="item"><div class="rank">${n}.</div><div>
     <div class="title" style="margin-top:0"><a href="${hn(r.id)}" target="_blank" rel="noopener" style="font-weight:600">${esc(r.title)}</a></div>
-    <div class="head">${repoName(r.repo, `/r/${esc(r.repo)}`)}${ghMeta(r)}</div>
+    <div class="head">${repoName(r.repo, `/r/${esc(r.repo)}`, r.avatar)}${ghMeta(r)}</div>
     <div class="meta">
       <span class="pts">${fmt(r.points)} points</span>
       <a href="${hn(r.id)}" target="_blank" rel="noopener">${fmt(r.comments)} comments</a>
@@ -623,7 +626,7 @@ async function renderRepo(key) {
   view.innerHTML = `<div class="page">
     <div class="crumb"><a href="/">HackerGit</a> / <a href="/?q=owner:${encodeURIComponent(r.owner)}">${esc(r.owner)}</a></div>
     <div class="repohead">
-      ${avatar(r.owner, 40)}<h1 class="mono">${esc(r.repo)}</h1>
+      ${avatar(r.owner, 40, r.avatar)}<h1 class="mono">${esc(r.repo)}</h1>
       <a class="chip" href="https://github.com/${esc(r.repo)}" target="_blank" rel="noopener">GitHub ↗</a>
     </div>
     ${r.descr ? `<p class="descr" style="font-size:15px;margin:4px 0 0">${esc(r.descr)}</p>` : ""}
@@ -1043,7 +1046,7 @@ function trendItem(r, n) {
   const live = [r.front_best ? `<span class="rk${r.front_best <= 30 ? " hot" : ""}" title="${tip}">#${r.front_best} on the front page</span>` : "",
                 r.show_best ? `<span class="rk${r.show_best <= 30 ? " hot" : ""}" title="${tip}">#${r.show_best} on Show HN</span>` : ""].join("");
   return `<li class="item"><div class="rank">${n}.</div><div>
-    <div class="head">${repoName(r.repo, `/r/${esc(r.repo)}`)}${ghMeta(r)}</div>
+    <div class="head">${repoName(r.repo, `/r/${esc(r.repo)}`, r.avatar)}${ghMeta(r)}</div>
     <div class="title"><a href="${hn(r.top_id)}" target="_blank" rel="noopener">${esc(r.top_title)}</a></div>
     ${live ? `<div class="rks">${live}</div>` : ""}
     ${r.descr ? `<div class="descr">${esc(r.descr)}</div>` : ""}
@@ -1133,16 +1136,16 @@ window.addEventListener("popstate", route);
     if (input.value.trim() !== q) return;
     box.replaceChildren(); items = []; active = -1;
     const section = (title) => { const h = document.createElement("div"); h.className = "sugg-h"; h.textContent = title; box.append(h); };
-    const row = (href, iconOwner, text, meta) => {
+    const row = (href, iconOwner, text, meta, av) => {
       const a = document.createElement("a"); a.href = href; a.setAttribute("role", "option");
-      if (iconOwner) a.insertAdjacentHTML("afterbegin", avatar(iconOwner, 18));
+      if (iconOwner) a.insertAdjacentHTML("afterbegin", avatar(iconOwner, 18, av));
       const t = document.createElement("span"); t.className = "mono"; t.textContent = text;
       const m = document.createElement("span"); m.className = "m"; m.textContent = meta;
       a.append(t, m); a.addEventListener("mousedown", (e) => e.preventDefault());
       a.addEventListener("click", (e) => { e.preventDefault(); close(); input.blur(); go(href); });
       box.append(a); items.push(a);
     };
-    if (d.repos.length) { section("Repos"); d.repos.forEach(r => row(`/r/${r.repo}`, r.repo.split("/")[0], r.repo, `${fmt(r.points)} pts`)); }
+    if (d.repos.length) { section("Repos"); d.repos.forEach(r => row(`/r/${r.repo}`, r.repo.split("/")[0], r.repo, `${fmt(r.points)} pts`, r.avatar)); }
     if (d.users.length) { section("HN users"); d.users.forEach(u => row(`/u/${encodeURIComponent(u.name)}`, null, u.name, `${short(u.karma)} karma`)); }
     box.hidden = !items.length;
   };
@@ -1171,6 +1174,9 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "/" && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) { e.preventDefault(); $("#q").focus(); }
 });
 statsP.finally(route);
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
+}
 </script>
 </body>
 </html>

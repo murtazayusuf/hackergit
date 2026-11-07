@@ -70,7 +70,8 @@ CREATE INDEX IF NOT EXISTS stories_author ON stories(author);
 CREATE INDEX IF NOT EXISTS stories_time ON stories(time);
 CREATE TABLE IF NOT EXISTS users (name TEXT PRIMARY KEY, karma INTEGER, created INTEGER, fetched INTEGER);
 CREATE TABLE IF NOT EXISTS github (
-  key TEXT PRIMARY KEY, stars INTEGER, lang TEXT, descr TEXT, archived INTEGER, missing INTEGER DEFAULT 0, fetched INTEGER
+  key TEXT PRIMARY KEY, stars INTEGER, lang TEXT, descr TEXT, archived INTEGER, missing INTEGER DEFAULT 0, fetched INTEGER,
+  avatar TEXT
 );
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
 -- Cleaned README text per repo, with its own search index kept up to date incrementally (never rebuilt).
@@ -118,7 +119,8 @@ CREATE TABLE IF NOT EXISTS repos (
   show_id INTEGER, show_title TEXT, show_points INTEGER, show_comments INTEGER,  -- best Show HN post
   show_author TEXT, show_karma INTEGER,
   ach_id INTEGER, ach_points INTEGER, ach_rank INTEGER,          -- best achievement (see rebuild)
-  ach_period TEXT, ach_scope TEXT, ach_date TEXT
+  ach_period TEXT, ach_scope TEXT, ach_date TEXT,
+  avatar TEXT                       -- owner's GitHub avatar URL (direct, no redirect)
 );
 CREATE INDEX IF NOT EXISTS repos_points ON repos(points);
 CREATE INDEX IF NOT EXISTS repos_comments ON repos(comments);
@@ -152,7 +154,10 @@ def connect(readonly=False):
     else:
         con = sqlite3.connect(DB_PATH, timeout=60)
         cols = {r[1] for r in con.execute("PRAGMA table_info(repos)")}
-        migrate = bool(cols) and "ach_rank" not in cols
+        migrate = bool(cols) and "avatar" not in cols
+        gcols = {r[1] for r in con.execute("PRAGMA table_info(github)")}
+        if gcols and "avatar" not in gcols:
+            con.execute("ALTER TABLE github ADD COLUMN avatar TEXT")
         if migrate:
             con.execute("DROP TABLE repos")
         con.executescript(SCHEMA)
@@ -393,8 +398,8 @@ def refresh_github(con, limit=25000, stale_days=14):
     now = int(time.time())
     keys = [r[0] for r in con.execute("""
         SELECT r.key FROM repos r LEFT JOIN github g ON g.key=r.key
-        WHERE g.key IS NULL OR g.fetched < ? OR (r.last_time > ? AND g.fetched < ?)
-        ORDER BY g.fetched IS NOT NULL, r.points DESC LIMIT ?""",
+        WHERE g.key IS NULL OR (g.avatar IS NULL AND g.missing = 0) OR g.fetched < ? OR (r.last_time > ? AND g.fetched < ?)
+        ORDER BY g.fetched IS NOT NULL, g.avatar IS NOT NULL, r.points DESC LIMIT ?""",
         (now - stale_days * 86400, now - 30 * 86400, now - 86400, limit))]
     done = 0
     for i in range(0, len(keys), 80):
@@ -403,7 +408,7 @@ def refresh_github(con, limit=25000, stale_days=14):
         for j, k in enumerate(chunk):
             owner, name = k.split("/", 1)
             parts.append(f'r{j}: repository(owner: {json.dumps(owner)}, name: {json.dumps(name)}) '
-                         '{ stargazerCount isArchived description primaryLanguage { name } }')
+                         '{ stargazerCount isArchived description primaryLanguage { name } owner { avatarUrl(size: 80) } }')
         q = "query {" + "\n".join(parts) + "}"
         try:
             d = http_json("https://api.github.com/graphql", data={"query": q},
@@ -425,10 +430,11 @@ def refresh_github(con, limit=25000, stale_days=14):
             r = data.get(f"r{j}")
             if r:
                 rows.append((k, r["stargazerCount"], (r.get("primaryLanguage") or {}).get("name"),
-                             (r.get("description") or "")[:400], int(r["isArchived"]), 0, now))
+                             (r.get("description") or "")[:400], int(r["isArchived"]), 0, now,
+                             (r.get("owner") or {}).get("avatarUrl")))
             else:
-                rows.append((k, None, None, None, None, 1, now))
-        con.executemany("INSERT OR REPLACE INTO github(key,stars,lang,descr,archived,missing,fetched) VALUES(?,?,?,?,?,?,?)", rows)
+                rows.append((k, None, None, None, None, 1, now, None))
+        con.executemany("INSERT OR REPLACE INTO github(key,stars,lang,descr,archived,missing,fetched,avatar) VALUES(?,?,?,?,?,?,?,?)", rows)
         day = time.strftime("%Y-%m-%d", time.gmtime(now))
         con.executemany("INSERT OR REPLACE INTO stars_log(key, day, stars) VALUES (?,?,?)",
                         [(r[0], day, r[1]) for r in rows if r[1] is not None])
@@ -600,7 +606,7 @@ def rebuild(con):
         INSERT INTO repos(key, repo, owner, name, subs, points, total_points, comments, first_time, last_time,
                           top_id, top_title, top_author, karma, max_karma, stars, lang, descr,
                           kinds, show_id, show_title, show_points, show_comments, show_author, show_karma,
-                          ach_id, ach_points, ach_rank, ach_period, ach_scope, ach_date)
+                          ach_id, ach_points, ach_rank, ach_period, ach_scope, ach_date, avatar)
         WITH s AS (
           SELECT st.*, lower(st.repo) AS k, coalesce(u.karma, 0) AS karma,
                  row_number() OVER (PARTITION BY lower(st.repo) ORDER BY st.points DESC, st.time) AS rn
@@ -622,7 +628,7 @@ def rebuild(con):
                a.subs, a.points, a.total_points, a.comments, a.first_time, a.last_time,
                t.id, t.title, t.author, t.karma, a.max_karma, g.stars, g.lang, g.descr,
                a.kinds, sh.id, sh.title, sh.points, sh.comments, sh.author, sh.karma,
-               ac.id, ac.points, ac.rk, ac.per, ac.sc, ac.dt
+               ac.id, ac.points, ac.rk, ac.per, ac.sc, ac.dt, g.avatar
         FROM agg a JOIN s t ON t.k = a.k AND t.rn = 1
         LEFT JOIN sh ON sh.k = a.k AND sh.rn = 1
         LEFT JOIN temp.ach ac ON ac.k = a.k

@@ -26,7 +26,7 @@ import hackergit as hg
 ROOT = os.path.dirname(os.path.abspath(__file__))
 INDEX = os.path.join(ROOT, "static", "index.html")
 SITE = os.environ.get("SITE_URL", "https://hackergit.org").rstrip("/")
-STATIC_FILES = {"/og.png": ("og.png", "image/png")}
+STATIC_FILES = {"/og.png": ("og.png", "image/png"), "/sw.js": ("sw.js", "application/javascript")}
 SITEMAP_CHUNK = 40000  # sitemap files may hold at most 50,000 URLs
 PAGE_SIZE = 30
 
@@ -202,7 +202,7 @@ def search(p):
                    LEFT JOIN github g ON g.key = lower(s.repo) {w}"""
         total = con.execute(f"SELECT count(*) {base}", args).fetchone()[0]
         rows = con.execute(f"""SELECT s.id, s.repo, s.url, s.title, s.author, s.points, s.comments, s.time,
-                coalesce(u.karma, 0) AS karma, g.stars, g.lang, g.descr {base}
+                coalesce(u.karma, 0) AS karma, g.stars, g.lang, g.descr, g.avatar {base}
                 ORDER BY {order}, s.id DESC LIMIT ? OFFSET ?""", args + [PAGE_SIZE, page * PAGE_SIZE]).fetchall()
     else:
         order = SORTS_REPOS.get(sort, SORTS_REPOS["points"])
@@ -258,9 +258,9 @@ def suggest(q):
         return {"repos": [], "users": []}
     hi = q + "\uffff"
     con = db()
-    repos = con.execute("""SELECT repo, points, stars FROM (
-            SELECT key, repo, points, stars FROM repos WHERE key >= ? AND key < ?
-            UNION SELECT key, repo, points, stars FROM repos WHERE lower(name) >= ? AND lower(name) < ?)
+    repos = con.execute("""SELECT repo, points, stars, avatar FROM (
+            SELECT key, repo, points, stars, avatar FROM repos WHERE key >= ? AND key < ?
+            UNION SELECT key, repo, points, stars, avatar FROM repos WHERE lower(name) >= ? AND lower(name) < ?)
         ORDER BY points DESC LIMIT 6""", (q, hi, q, hi)).fetchall()
     users = con.execute("""SELECT name, karma FROM users WHERE lower(name) >= ? AND lower(name) < ? AND karma > 0
         ORDER BY karma DESC LIMIT 3""", (q, hi)).fetchall() if "/" not in q else []
@@ -851,7 +851,7 @@ class Handler(BaseHTTPRequestHandler):
             if u.path in STATIC_FILES:
                 fname, ctype = STATIC_FILES[u.path]
                 with open(os.path.join(ROOT, "static", fname), "rb") as fh:
-                    return self.send(200, fh.read(), ctype, "public, max-age=86400")
+                    return self.send(200, fh.read(), ctype, "no-cache" if fname == "sw.js" else "public, max-age=86400")
             if u.path == "/healthz":
                 return self.send(200, "ok", "text/plain")
             status, html = page_html(u.path)
