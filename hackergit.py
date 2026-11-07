@@ -658,6 +658,40 @@ def update(con, karma_limit=None):
     con.commit()
 
 
+def daemon(minutes=10, rank_minutes=2):
+    """All background work, meant to run as its own low-priority process next to the web server."""
+    import threading
+
+    def ranks_loop():
+        con = connect()
+        while True:
+            try:
+                track_ranks(con, rank_minutes)
+            except Exception as e:
+                log("ranks: error:", e)
+            time.sleep(rank_minutes * 60)
+
+    if rank_minutes > 0:
+        threading.Thread(target=ranks_loop, daemon=True).start()
+    while True:
+        if minutes <= 0:
+            time.sleep(3600)
+            continue
+        try:
+            con = connect()
+            if not meta_get(con, "backfill_done"):
+                log("daemon: no data yet, running backfill (takes ~10-20 min)")
+                backfill(con)
+                rebuild(con)  # show results now; karma fills in next
+                refresh_karma(con)
+                rebuild(con)
+            update(con)
+            con.close()
+        except Exception as e:
+            log("daemon: update failed:", e)
+        time.sleep(minutes * 60)
+
+
 def stats(con):
     q = lambda s: con.execute(s).fetchone()[0]
     return {
@@ -686,6 +720,8 @@ def main():
         refresh_github(con, limit=10 ** 9) and rebuild(con)
         meta_set(con, "last_update", int(time.time()))
         con.commit()
+    elif cmd == "daemon":
+        daemon(float(sys.argv[2]) if len(sys.argv) > 2 else 10, float(sys.argv[3]) if len(sys.argv) > 3 else 2)
     elif cmd == "update":
         update(con)
     elif cmd == "karma":

@@ -14,6 +14,8 @@ import json
 import os
 import queue
 import re
+import subprocess
+import sys
 import threading
 import time
 import traceback
@@ -863,46 +865,46 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(500, '{"error":"server error"}', "application/json")
 
 
-def rank_tracker(minutes):
-    """Poll HN's front page and Show HN page every few minutes and record positions."""
-    con = hg.connect()
+def background_process(minutes, rank_minutes):
+    """Run all background work (HN updates, karma, stars, READMEs, rankings, rank tracking) in a separate,
+    low-priority process, so it never competes with page requests for Python's interpreter lock.
+    Restarted automatically if it exits."""
+    cmd = [sys.executable, os.path.join(ROOT, "hackergit.py"), "daemon", str(minutes), str(rank_minutes)]
     while True:
         try:
-            hg.track_ranks(con, minutes)
+            proc = subprocess.Popen(cmd, preexec_fn=lambda: os.nice(10))
+            code = proc.wait()
+            hg.log(f"background process exited ({code}); restarting in 30s")
         except Exception:
             traceback.print_exc()
-        time.sleep(minutes * 60)
+        time.sleep(30)
 
 
-def updater(minutes):
-    """Background loop: backfill if the database is empty, then pull fresh stories every few minutes."""
+def cache_warmer():
+    """When the background process publishes a new index, pre-compute the pages most people open."""
+    seen = None
     while True:
         try:
-            con = hg.connect()
-            if not hg.meta_get(con, "backfill_done"):
-                hg.log("updater: no data yet, running backfill (takes ~10-20 min)")
-                hg.backfill(con)
-                hg.rebuild(con)  # show results now; karma fills in next
-                warm_cache()
-                hg.refresh_karma(con)
-                hg.rebuild(con)
-            hg.update(con)
-            con.close()
-            warm_cache()
+            v = data_version(force=True)
+            if v != seen:
+                if seen is not None:
+                    warm_cache()
+                seen = v
         except Exception:
             traceback.print_exc()
-        time.sleep(minutes * 60)
+        finally:
+            release_db()
+        time.sleep(20)
 
 
 def main():
     port = int(os.environ.get("PORT", "8000"))
     minutes = float(os.environ.get("UPDATE_MINUTES", "10"))
     hg.connect().close()  # make sure the schema exists before readers open it
-    if minutes > 0:
-        threading.Thread(target=updater, args=(minutes,), daemon=True).start()
     rank_minutes = float(os.environ.get("RANK_MINUTES", "2"))
-    if rank_minutes > 0:
-        threading.Thread(target=rank_tracker, args=(rank_minutes,), daemon=True).start()
+    if minutes > 0 or rank_minutes > 0:
+        threading.Thread(target=background_process, args=(minutes, rank_minutes), daemon=True).start()
+    threading.Thread(target=cache_warmer, daemon=True).start()
     host = os.environ.get("HOST", "0.0.0.0")
     ThreadingHTTPServer.request_queue_size = 1024  # default is 5: bursts got delayed ~1 s by connection retries
     srv = ThreadingHTTPServer((host, port), Handler)
