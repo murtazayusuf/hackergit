@@ -26,6 +26,8 @@ if ! command -v caddy >/dev/null; then
   $APT install caddy
 fi
 command -v python3 >/dev/null || { $APT update; $APT install python3; }
+# rsvg-convert renders the per-repo share cards (/og/<owner>/<repo>.png); Inter is the font they're drawn in.
+command -v rsvg-convert >/dev/null || { $APT update; $APT install librsvg2-bin fonts-inter fonts-dejavu-core; }
 
 # 1 GB of swap so a small server never runs out of memory during index rebuilds.
 if [ ! -f /swapfile ]; then

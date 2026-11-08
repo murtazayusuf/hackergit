@@ -133,6 +133,18 @@ Prefer to send readers straight to Hacker News? Point the link at your HN post i
 (`https://news.ycombinator.com/item?id=...`); the badge picker on each repo page has a checkbox for this.
 It shows the best-scoring post and updates on its own. Every repo page on hackergit.org has a copy button.
 
+## Share cards
+
+Every repo page has its own link preview (`og:image`), so a hackergit.org link posted to X, Slack, Discord or
+LinkedIn shows the repo's Hacker News record:
+
+<img src="docs/og-example.png" alt="HackerGit share card for arnegiacomo/fugleramme: #1 Show HN of All Time" width="600">
+
+The card shows the owner's avatar, the repo name, description and language, HN points, comments and stars. Its
+best achievement is shown as the repo's rank badge, and up to three more achievements sit below. It's drawn as SVG
+(`/og/<owner>/<repo>.svg`) and turned into a PNG per request (`/og/<owner>/<repo>.png`) with `rsvg-convert`,
+because social sites don't accept SVG previews. Nothing is stored; crawlers cache it for an hour.
+
 ## API
 
 All endpoints return JSON.
@@ -146,6 +158,7 @@ All endpoints return JSON.
 - `GET /api/user?name=pg`: karma and totals for an HN user
 - `GET /api/stats`
 - `GET /badge/<owner>/<repo>.svg`: README badge (see above)
+- `GET /og/<owner>/<repo>.png` (or `.svg`): 1200×630 share card (see above)
 - `GET /sitemap.xml`: sitemap index of every repo page
 
 ## How it fits together
