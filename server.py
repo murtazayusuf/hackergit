@@ -712,7 +712,7 @@ def _laurel(cx, cy, r, color, n=4, start=26, end=146, spread=34, L=7.4, w=3.0):
     return (f'<g fill="{color}">{branch}<g transform="translate({2 * cx} 0) scale(-1 1)">{branch}</g></g>')
 
 
-def badge_card(label, big, small, theme="light", muted=False):
+def badge_card(label, big, small, theme="light", muted=False, font=None):
     """A 250x55 card badge (the size Trendshift and similar README cards use); wider only if the text needs it."""
     dark = theme == "dark"
     bg, fg, sub = ("#0d1117", "#e6edf3", "#9198a1") if dark else ("#ffffff", "#1f2328", "#59636e")
@@ -723,7 +723,7 @@ def badge_card(label, big, small, theme="light", muted=False):
     big_fs = max(12.5, min(17.0, 17.0 * room / max(1, _w(big, 17, True) * 0.87)))
     small_fs = max(9.0, min(10.5, 10.5 * room / max(1, _w(small, 10.5) * 0.87)))
     L, B, S = xml_esc(label), xml_esc(big), xml_esc(small)
-    font = "-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans',Helvetica,Arial,sans-serif"
+    font = font or "-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans',Helvetica,Arial,sans-serif"
     icon_svg = (("" if muted else _laurel(30, 27.5, 19, accent))
                 + f'<rect x="21" y="18.5" width="18" height="18" rx="4" fill="{accent}"/>'
                 + '<text x="30" y="32" fill="#fff" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" '
@@ -822,9 +822,15 @@ def _place(svg, x, y, scale):
                   f'<svg x="{x}" y="{y}" width="{w * scale:.1f}" height="{h * scale:.1f}"', svg.strip(), count=1)
 
 
+def _tw(text, size, bold=False):
+    """Width of text in Inter, from the Verdana table: measured against Inter's real glyph widths, regular text
+    runs ~5% narrower than the table and bold ~13% narrower than its bold estimate (kept with a little slack)."""
+    return _w(text, size, bold) * (0.90 if bold else 0.97)
+
+
 def _fit(text, size, maxw, bold=False, floor=10.0):
-    """Largest font size <= size at which text fits in maxw (Inter runs ~13% narrower than the Verdana table)."""
-    w = _w(text, size, bold) * 0.87
+    """Largest font size <= size at which text fits in maxw."""
+    w = _tw(text, size, bold)
     return max(floor, min(size, size * maxw / max(1.0, w)))
 
 
@@ -832,7 +838,7 @@ def _wrap(text, size, maxw, max_lines):
     words, lines, cur = text.split(), [], ""
     for wd in words:
         t = f"{cur} {wd}".strip()
-        if _w(t, size) * 0.87 <= maxw or not cur:
+        if _tw(t, size) <= maxw or not cur:
             cur = t
         else:
             lines.append(cur)
@@ -843,7 +849,7 @@ def _wrap(text, size, maxw, max_lines):
         lines.append(cur)
     if len(lines) == max_lines and " ".join(lines) != " ".join(words):
         last = lines[-1]
-        while last and _w(last + "…", size) * 0.87 > maxw:
+        while last and _tw(last + "…", size) > maxw:
             last = last[:-1]
         lines[-1] = last.rstrip(" ,.;:-—") + "…"
     return lines
@@ -921,8 +927,8 @@ def og_svg(key, inline_avatar=False):
     tx, tw = 128, LW - 72
     title = f"{owner} / {name}"
     ts = _fit(title, 42, tw, True, floor=24)
-    if _w(title, ts, True) * 0.87 > tw:  # still too long at the floor size: trim the repo name
-        while len(name) > 4 and _w(f"{owner} / {name}…", ts, True) * 0.87 > tw:
+    if _tw(title, ts, True) > tw:  # still too long at the floor size: trim the repo name
+        while len(name) > 4 and _tw(f"{owner} / {name}…", ts, True) > tw:
             name = name[:-1]
         name += "…"
     out.append(f'<text x="{tx}" y="{172 + ts * 0.36:.1f}" xml:space="preserve" font-size="{ts:.1f}" font-weight="800" letter-spacing="-.5">'
@@ -948,7 +954,7 @@ def og_svg(key, inline_avatar=False):
         b, k = badges[0], RW / 250
         out.append(f'<rect x="{RX + 16}" y="{136}" width="{RW - 32}" height="{55 * k - 22:.1f}" rx="16" fill="#ff6600" '
                    'opacity=".28" filter="url(#soft)"/>'
-                   + _place(badge_card("Hacker News", b["big"], b["small"], "dark"), RX, 124, k))
+                   + _place(badge_card("Hacker News", b["big"], b["small"], "dark", font=OG_FONT), RX, 124, k))
 
     # row 2, right: three equal stat tiles spanning the badge's width
     third = (f"{r['stars']:,}", "GitHub stars") if r["stars"] is not None else (f"{r['subs']:,}", "HN posts" if r["subs"] != 1 else "HN post")
@@ -968,7 +974,7 @@ def og_svg(key, inline_avatar=False):
         x0 = 56 + (1088 - (len(more) * 370 - 22)) / 2  # one or two badges sit centred, label above the first
         out.append(f'<text x="{x0:.0f}" y="420" fill="#9198a1" font-size="18" font-weight="600">Other achievements</text>')
         for i, b in enumerate(more):
-            out.append(_place(badge_card("Hacker News", b["big"], b["small"], "dark"), f"{x0 + i * 370:.0f}", 436, 348 / 250))
+            out.append(_place(badge_card("Hacker News", b["big"], b["small"], "dark", font=OG_FONT), f"{x0 + i * 370:.0f}", 436, 348 / 250))
 
     out.append('<line x1="56" y1="556" x2="1144" y2="556" stroke="#232a33" stroke-width="1.5"/>'
                '<text x="56" y="598" fill="#ff6600" font-size="20" font-weight="800" letter-spacing="1.2">HACKERGIT.ORG</text>'
