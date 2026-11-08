@@ -540,6 +540,13 @@ def page_html(path):
                      (r'<link rel="canonical" href="[^"]*">', f'<link rel="canonical" href="{u}">'),
                      (r'<meta property="og:url" content="[^"]*">', f'<meta property="og:url" content="{u}">')):
         html = re.sub(pat, lambda _m, v=val: v, html, count=1)
+    if status == 200 and canonical.startswith(SITE + "/r/"):  # repo pages get their own share card
+        img = xml_esc(SITE + "/og/" + canonical[len(SITE) + 3:] + ".png")
+        for pat, val in ((r'<meta property="og:image" content="[^"]*">', f'<meta property="og:image" content="{img}">'),
+                         (r'<meta name="twitter:image" content="[^"]*">', f'<meta name="twitter:image" content="{img}">'),
+                         (r'<meta property="og:image:alt" content="[^"]*">',
+                          f'<meta property="og:image:alt" content="{t}">')):
+            html = re.sub(pat, lambda _m, v=val: v, html, count=1)
     head_extra = ('<meta name="robots" content="noindex">' if status == 404 else "")
     if ld:
         head_extra += '<script type="application/ld+json">' + json.dumps(ld).replace("</", "<\\/") + "</script>"
@@ -777,6 +784,214 @@ def badge(path, query):
     return badge_svg(label, value)
 
 
+# ---------------------------------------------------------------- per-repo Open Graph images
+
+OG_FONT = "Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif"
+_PERIOD_ORDER = {"alltime": 0, "year": 1, "month": 2, "week": 3, "day": 4, "live": 5}
+
+
+def og_badges(con, r):
+    """Every ranking a repo holds as badge text, best first: [{'big': '#1 Show HN of All Time',
+    'small': '2,391 points · 267 comments', 'n': 1}, ...] (the same text as /badge/...?style=rank&rank=...).
+    Score = (rank - 0.5) / sqrt(pool size): a #1 of the year beats a #19 of all time, and a #5 of the day
+    beats a #1,500 of the year (a plain percentile would call those a tie)."""
+    cands = []
+    for g in repo_rankings(con, r):
+        post = con.execute("SELECT comments FROM stories WHERE id = ?", (g["post_id"],)).fetchone()
+        comments = post["comments"] if post else 0
+        for per in RANK_PERIODS:
+            info = g["ranks"][per]
+            if not info["rank"] or not info["total"]:
+                continue
+            big, small = ranking_label(per, g["scope"], info, g["points"], comments)
+            cands.append(((info["rank"] - 0.5) / math.sqrt(info["total"]), _PERIOD_ORDER[per], g["scope"] == "show",
+                          info["rank"], big, small))
+    if r["ach_period"] == "live" and r["ach_rank"]:  # best live position on the front page / Show HN page
+        post = con.execute("SELECT comments FROM stories WHERE id = ?", (r["ach_id"],)).fetchone()
+        big, small = ach_label(r, post["comments"] if post else None)
+        cands.append(((r["ach_rank"] - 0.5) / math.sqrt(30), _PERIOD_ORDER["live"], r["ach_scope"] == "show",
+                      r["ach_rank"], big, small))
+    cands.sort()
+    return [{"big": c[4], "small": c[5], "n": c[3]} for c in cands]
+
+
+def _place(svg, x, y, scale):
+    """Embed a standalone badge SVG at (x, y), scaled."""
+    w, h = (float(v) for v in re.search(r'width="([\d.]+)" height="([\d.]+)"', svg).groups())
+    return re.sub(r'<svg xmlns="[^"]*" width="[\d.]+" height="[\d.]+"',
+                  f'<svg x="{x}" y="{y}" width="{w * scale:.1f}" height="{h * scale:.1f}"', svg.strip(), count=1)
+
+
+def _fit(text, size, maxw, bold=False, floor=10.0):
+    """Largest font size <= size at which text fits in maxw (Inter runs ~13% narrower than the Verdana table)."""
+    w = _w(text, size, bold) * 0.87
+    return max(floor, min(size, size * maxw / max(1.0, w)))
+
+
+def _wrap(text, size, maxw, max_lines):
+    words, lines, cur = text.split(), [], ""
+    for wd in words:
+        t = f"{cur} {wd}".strip()
+        if _w(t, size) * 0.87 <= maxw or not cur:
+            cur = t
+        else:
+            lines.append(cur)
+            cur = wd
+            if len(lines) == max_lines:
+                break
+    if cur and len(lines) < max_lines:
+        lines.append(cur)
+    if len(lines) == max_lines and " ".join(lines) != " ".join(words):
+        last = lines[-1]
+        while last and _w(last + "…", size) * 0.87 > maxw:
+            last = last[:-1]
+        lines[-1] = last.rstrip(" ,.;:-—") + "…"
+    return lines
+
+
+# GitHub's language colours (same table as LANG_COLORS in static/index.html)
+LANG_COLORS = {"Python": "#3572A5", "JavaScript": "#f1e05a", "TypeScript": "#3178c6", "Go": "#00ADD8", "Rust": "#dea584",
+               "C": "#555555", "C++": "#f34b7d", "C#": "#178600", "Java": "#b07219", "Ruby": "#701516", "Swift": "#F05138",
+               "Kotlin": "#A97BFF", "PHP": "#4F5D95", "Shell": "#89e051", "Haskell": "#5e5086", "Elixir": "#6e4a7e",
+               "Clojure": "#db5855", "Scala": "#c22d40", "Zig": "#ec915c", "Lua": "#000080", "Jupyter Notebook": "#DA5B0B",
+               "HTML": "#e34c26", "CSS": "#563d7c", "Dart": "#00B4AB", "OCaml": "#ef7a08", "Nim": "#ffc200", "Julia": "#a270ba",
+               "R": "#198CE7", "Perl": "#0298c3", "Objective-C": "#438eff", "Erlang": "#B83998", "Vue": "#41b883",
+               "Svelte": "#ff3e00", "Elm": "#60B5CC", "Lisp": "#3fb68b", "Common Lisp": "#3fb68b", "Emacs Lisp": "#c065db",
+               "Racket": "#3c5caa", "V": "#4f87c4", "Gleam": "#ffaff3", "Odin": "#60AFFE", "Crystal": "#000100",
+               "F#": "#b845fc", "Vim": "#199f4b", "Vim Script": "#199f4b", "Assembly": "#6E4C13", "Fortran": "#4d41b1",
+               "Solidity": "#AA6746", "Nix": "#7e7eff", "TeX": "#3D6117", "Makefile": "#427819", "Dockerfile": "#384d54",
+               "MDX": "#fcb32c", "Markdown": "#083fa1"}
+AVATAR_HOST = "https://avatars.githubusercontent.com/"
+
+
+def _avatar_data(url):
+    """The owner's GitHub avatar as a data: URI (rsvg-convert won't fetch remote images), or None."""
+    import base64
+    import urllib.request
+    if not url or not url.startswith(AVATAR_HOST):
+        return None
+    url = re.sub(r"([?&])s=\d+", r"\g<1>s=120", url)
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "HackerGit"}), timeout=3) as resp:
+            ctype = resp.headers.get_content_type()
+            data = resp.read(300_000)
+        if not ctype.startswith("image/"):
+            return None
+        return f"data:{ctype};base64,{base64.b64encode(data).decode()}"
+    except Exception:
+        return None
+
+
+def og_svg(key, inline_avatar=False):
+    """1200x630 share card for /r/<owner>/<repo>. Two columns: avatar + name, description and language on the
+    left; the best achievement badge and three stat tiles on the right; up to three more badges below.
+    inline_avatar embeds the avatar as data (needed for PNG); otherwise the SVG links to it."""
+    con = db()
+    r = con.execute("SELECT * FROM repos WHERE key = ?", (key.lower(),)).fetchone()
+    if not r:
+        return None
+    badges = og_badges(con, r)
+    owner, name = r["repo"].split("/", 1)
+    E = xml_esc
+    L, RX, RW = 56, 704, 440          # left column x; right column x and width (ends at 1144)
+    LW = RX - 36 - L                  # left column width
+    out = ['<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1200" height="630" viewBox="0 0 1200 630">',
+           '<defs><radialGradient id="glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" '
+           'gradientTransform="translate(40 20) scale(560 460)"><stop offset="0" stop-color="#ff6600" stop-opacity=".30"/>'
+           '<stop offset=".55" stop-color="#ff6600" stop-opacity=".07"/><stop offset="1" stop-color="#ff6600" stop-opacity="0"/>'
+           '</radialGradient><filter id="soft" x="-20%" y="-40%" width="140%" height="180%"><feGaussianBlur stdDeviation="16"/></filter>'
+           '<clipPath id="av"><circle cx="84" cy="172" r="28"/></clipPath></defs>',
+           '<rect width="1200" height="630" fill="#0b0f15"/><rect width="1200" height="630" fill="url(#glow)"/>',
+           f'<g font-family="{OG_FONT}">',
+           '<rect x="56" y="36" width="54" height="54" rx="13" fill="#ff6600"/>'
+           '<text x="83" y="75" fill="#fff" font-size="34" font-weight="800" text-anchor="middle">H</text>'
+           '<text x="126" y="76" font-size="38" font-weight="800" letter-spacing="-.5"><tspan fill="#f0f3f6">Hacker</tspan>'
+           '<tspan fill="#ff6600">Git</tspan></text>']
+
+    more = [b for b in badges[1:] if b["n"] <= 100][:3]
+    # without a row of other achievements, drop rows 1-2 down so the card isn't top-heavy
+    out.append(f'<g transform="translate(0 {0 if more else 70})">')
+    # row 1, left: avatar + owner / name, vertically centred on the main badge (y = 172)
+    av = _avatar_data(r["avatar"]) if inline_avatar else (r["avatar"] if (r["avatar"] or "").startswith(AVATAR_HOST) else None)
+    out.append('<circle cx="84" cy="172" r="28" fill="#21262d"/>' + (
+        f'<image x="56" y="144" width="56" height="56" href="{E(av)}" xlink:href="{E(av)}" clip-path="url(#av)" '
+        'preserveAspectRatio="xMidYMid slice"/>' if av else
+        f'<text x="84" y="183" fill="#9198a1" font-size="30" font-weight="700" text-anchor="middle">{E(owner[:1].upper())}</text>')
+        + '<circle cx="84" cy="172" r="28" fill="none" stroke="#30363d" stroke-width="1.5"/>')
+    tx, tw = 128, LW - 72
+    title = f"{owner} / {name}"
+    ts = _fit(title, 42, tw, True, floor=24)
+    if _w(title, ts, True) * 0.87 > tw:  # still too long at the floor size: trim the repo name
+        while len(name) > 4 and _w(f"{owner} / {name}…", ts, True) * 0.87 > tw:
+            name = name[:-1]
+        name += "…"
+    out.append(f'<text x="{tx}" y="{172 + ts * 0.36:.1f}" xml:space="preserve" font-size="{ts:.1f}" font-weight="800" letter-spacing="-.5">'
+               f'<tspan fill="#f0f3f6">{E(owner)}</tspan><tspan fill="#6e7681"> / </tspan>'
+               f'<tspan fill="#58a6ff">{E(name)}</tspan></text>')
+
+    # row 2, left: description, then language · first posted · posts
+    desc = (r["descr"] or r["top_title"] or "").replace(" - ", " — ")
+    for i, line in enumerate(_wrap(desc, 20.5, LW, 3)):  # top aligned with the stat tiles, meta row with their bottom
+        out.append(f'<text x="{L}" y="{265 + i * 28}" fill="#9198a1" font-size="20.5">{E(line)}</text>')
+    meta_y, mx, meta = 349, L, []
+    if r["lang"]:
+        out.append(f'<circle cx="{L + 7}" cy="{meta_y - 6}" r="7" fill="{LANG_COLORS.get(r["lang"], "#8b949e")}"/>')
+        mx = L + 22
+        meta.append(r["lang"])
+    meta.append(f"First on HN {_nice_date(day(r['first_time']))}")
+    meta.append(plural(r["subs"], "HN post"))
+    out.append(f'<text x="{mx}" y="{meta_y}" fill="#c9d1d9" font-size="19" xml:space="preserve">'
+               + '<tspan fill="#59636e">  ·  </tspan>'.join(E(m) for m in meta) + '</text>')
+
+    # row 1, right: the best achievement, the repo's own README badge (dark) scaled to the column width
+    if badges:
+        b, k = badges[0], RW / 250
+        out.append(f'<rect x="{RX + 16}" y="{136}" width="{RW - 32}" height="{55 * k - 22:.1f}" rx="16" fill="#ff6600" '
+                   'opacity=".28" filter="url(#soft)"/>'
+                   + _place(badge_card("Hacker News", b["big"], b["small"], "dark"), RX, 124, k))
+
+    # row 2, right: three equal stat tiles spanning the badge's width
+    third = (f"{r['stars']:,}", "GitHub stars") if r["stars"] is not None else (f"{r['subs']:,}", "HN posts" if r["subs"] != 1 else "HN post")
+    gap = 16
+    tw = (RW - 2 * gap) / 3
+    for i, (val, lab, col) in enumerate([(f"{r['points']:,}", "HN points", "#ff7a1a"),
+                                         (f"{r['comments']:,}", "comments", "#f0f3f6"), (*third, "#f0f3f6")]):
+        x = RX + i * (tw + gap)
+        out.append(f'<rect x="{x:.1f}" y="250" width="{tw:.1f}" height="100" rx="14" fill="#11161d" stroke="#2a313b" stroke-width="1.5"/>'
+                   f'<text x="{x + 18:.1f}" y="299" fill="{col}" font-size="{_fit(val, 34, tw - 34, True):.1f}" font-weight="800">{val}</text>'
+                   f'<text x="{x + 18:.1f}" y="331" fill="#9198a1" font-size="17">{lab}</text>')
+
+    out.append('</g>')
+
+    # row 3: up to three more achievements (skip the long tail: "#40,312 Repo of All Time" is not one)
+    if more:
+        x0 = 56 + (1088 - (len(more) * 370 - 22)) / 2  # one or two badges sit centred, label above the first
+        out.append(f'<text x="{x0:.0f}" y="420" fill="#9198a1" font-size="18" font-weight="600">Other achievements</text>')
+        for i, b in enumerate(more):
+            out.append(_place(badge_card("Hacker News", b["big"], b["small"], "dark"), f"{x0 + i * 370:.0f}", 436, 348 / 250))
+
+    out.append('<line x1="56" y1="556" x2="1144" y2="556" stroke="#232a33" stroke-width="1.5"/>'
+               '<text x="56" y="598" fill="#ff6600" font-size="20" font-weight="800" letter-spacing="1.2">HACKERGIT.ORG</text>'
+               '<text x="1144" y="597" fill="#9198a1" font-size="18" text-anchor="end" xml:space="preserve">Repository intelligence'
+               '<tspan fill="#59636e">   •   </tspan>Live rankings</text></g></svg>')
+    return "\n".join(out)
+
+
+def og_png(key):
+    """The share card as PNG (og:image must be a raster for X, Facebook, LinkedIn, Slack, Discord...), rendered
+    per request with rsvg-convert (~0.2 s) and not kept: crawlers and CDNs cache it via Cache-Control.
+    None if the repo is unknown or the renderer is missing."""
+    svg = og_svg(key, inline_avatar=True)
+    if not svg:
+        return None
+    try:
+        return subprocess.run(["rsvg-convert", "-f", "png"], input=svg.encode(), capture_output=True,
+                              timeout=15, check=True).stdout
+    except (OSError, subprocess.SubprocessError):
+        traceback.print_exc()
+        return None
+
+
 def warm_cache():
     """Precompute the pages most people open, right after the index changes."""
     data_version(force=True)
@@ -871,6 +1086,16 @@ class Handler(BaseHTTPRequestHandler):
                 if not body:
                     return self.send(404, "not found", "text/plain")
                 return self.send(200, body, "image/svg+xml; charset=utf-8", "public, max-age=300")
+            m = re.fullmatch(r"/og/([A-Za-z0-9-]+/[A-Za-z0-9._-]+?)\.(svg|png)", u.path)
+            if m:
+                if m.group(2) == "svg":
+                    body, ctype = og_svg(m.group(1)), "image/svg+xml; charset=utf-8"
+                else:
+                    body, ctype = og_png(m.group(1)), "image/png"
+                if not body:  # unknown repo (or no renderer): fall back to the site-wide card
+                    with open(os.path.join(ROOT, "static", "og.png"), "rb") as fh:
+                        body, ctype = fh.read(), "image/png"
+                return self.send(200, body, ctype, "public, max-age=3600")
             if u.path in STATIC_FILES:
                 fname, ctype = STATIC_FILES[u.path]
                 with open(os.path.join(ROOT, "static", fname), "rb") as fh:
