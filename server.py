@@ -541,7 +541,7 @@ def page_html(path):
                      (r'<meta property="og:url" content="[^"]*">', f'<meta property="og:url" content="{u}">')):
         html = re.sub(pat, lambda _m, v=val: v, html, count=1)
     if status == 200 and canonical.startswith(SITE + "/r/"):  # repo pages get their own share card
-        img = xml_esc(SITE + "/og/" + canonical[len(SITE) + 3:] + ".png")
+        img = xml_esc(f"{SITE}/og/{canonical[len(SITE) + 3:]}.png?v={OG_VERSION}")
         for pat, val in ((r'<meta property="og:image" content="[^"]*">', f'<meta property="og:image" content="{img}">'),
                          (r'<meta name="twitter:image" content="[^"]*">', f'<meta name="twitter:image" content="{img}">'),
                          (r'<meta property="og:image:alt" content="[^"]*">',
@@ -786,6 +786,9 @@ def badge(path, query):
 
 # ---------------------------------------------------------------- per-repo Open Graph images
 
+# Bump when the card's design changes: it's part of the og:image URL, so link-preview caches (X, Slack,
+# LinkedIn, opengraph checkers...) that key on the URL fetch the new card instead of reusing an old one.
+OG_VERSION = "3"
 OG_FONT = "Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif"
 _PERIOD_ORDER = {"alltime": 0, "year": 1, "month": 2, "week": 3, "day": 4, "live": 5}
 
