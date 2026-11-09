@@ -314,7 +314,8 @@ def repo_detail(key):
             LEFT JOIN ranks f ON f.id = s.id AND f.list = 'front'
             LEFT JOIN ranks sh ON sh.id = s.id AND sh.list = 'show'
             WHERE lower(s.repo) = ? ORDER BY s.time DESC""", (key.lower(),)).fetchall()
-    return {"repo": dict(r), "posts": [dict(x) for x in posts], "rankings": repo_rankings(con, r)}
+    return {"repo": dict(r), "posts": [dict(x) for x in posts], "rankings": repo_rankings(con, r),
+            "readme": readme_excerpt(con, r["key"]), "more": [dict(x) for x in owner_repos(con, r)]}
 
 
 def user_detail(name):
@@ -376,8 +377,12 @@ def day(ts):
     return time.strftime("%Y-%m-%d", time.gmtime(ts or 0))
 
 
+# Repo pages listed in the sitemap: the ones with enough substance to be worth indexing. Others stay reachable by links.
+SITEMAP_REPOS = "(points >= 5 OR subs >= 2)"
+
+
 def sitemap_index():
-    n = db().execute("SELECT count(*) FROM repos").fetchone()[0]
+    n = db().execute(f"SELECT count(*) FROM repos WHERE {SITEMAP_REPOS}").fetchone()[0]
     files = ["sitemaps/pages.xml"] + [f"sitemaps/repos-{i}.xml" for i in range((n + SITEMAP_CHUNK - 1) // SITEMAP_CHUNK)]
     today = day(time.time())
     items = "".join(f"<sitemap><loc>{SITE}/{f}</loc><lastmod>{today}</lastmod></sitemap>" for f in files)
@@ -397,7 +402,7 @@ def sitemap_file(name):
     m = re.fullmatch(r"repos-(\d+)\.xml", name)
     if not m:
         return None
-    rows = db().execute("SELECT repo, last_time FROM repos ORDER BY key LIMIT ? OFFSET ?",
+    rows = db().execute(f"SELECT repo, last_time FROM repos WHERE {SITEMAP_REPOS} ORDER BY key LIMIT ? OFFSET ?",
                         (SITEMAP_CHUNK, int(m.group(1)) * SITEMAP_CHUNK)).fetchall()
     if not rows:
         return None
@@ -419,6 +424,26 @@ def _repo_items(rows, title_key="top_title", id_key="top_id", pts_key="points", 
                    + (f'<span>{r["stars"]:,} GitHub stars</span>' if r["stars"] is not None else "")
                    + '</div></div></li>')
     return '<ol class="list">' + "".join(out) + "</ol>"
+
+
+def readme_excerpt(con, key, limit=700):
+    """The opening of a repo's cleaned README (unique text for search engines), cut at a sentence end."""
+    row = con.execute("SELECT text FROM readmes WHERE key = ? AND missing = 0", (key,)).fetchone()
+    t = (row["text"] if row else "") or ""
+    t = re.sub(r"^#+\s*", "", t).strip()
+    if len(t) < 80:
+        return ""
+    if len(t) > limit:
+        cut = t[:limit]
+        end = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
+        t = cut[:end + 1] if end > limit * 0.4 else cut.rsplit(" ", 1)[0] + "…"
+    return t
+
+
+def owner_repos(con, r, limit=8):
+    o = r["owner"].lower() + "/"
+    return con.execute("""SELECT repo, points, top_title FROM repos WHERE key >= ? AND key < ? AND key != ?
+        ORDER BY points DESC LIMIT ?""", (o, o + "\uffff", r["key"], limit)).fetchall()
 
 
 BADGE_TEXT = """<p>Add a <b>Hacker News badge</b> to your GitHub README to show how your repo did on HN: points, comments
@@ -492,9 +517,13 @@ def page_content(path):
         posts = con.execute("SELECT id, title, points, comments, author, time FROM stories WHERE lower(repo) = ? "
                             "ORDER BY points DESC LIMIT 50", (r["key"],)).fetchall()
         url = f"{SITE}/r/{r['repo']}"
+        excerpt = readme_excerpt(con, r["key"])
+        about = r["descr"] or excerpt[:160]
         desc = (f"{r['repo']} on Hacker News: {r['points']:,} points and {r['comments']:,} comments across {r['subs']} "
                 f"post{'s' if r['subs'] != 1 else ''}. Top post: “{r['top_title']}”."
-                + (f" {r['descr']}" if r["descr"] else ""))[:300]
+                + (f" {about}" if about else ""))[:300]
+        ach = ach_label(r)
+        more = owner_repos(con, r)
         items = "".join(f'<li><a href="https://news.ycombinator.com/item?id={p["id"]}">{xml_esc(p["title"])}</a> '
                         f'({p["points"]:,} points, {p["comments"]:,} comments, by {xml_esc(p["author"])}, {day(p["time"])})</li>'
                         for p in posts)
@@ -503,7 +532,13 @@ def page_content(path):
                 + f'<p>{r["points"]:,} best points · {r["comments"]:,} comments · {r["subs"]} Hacker News post{"s" if r["subs"] != 1 else ""}'
                 + (f' · {r["stars"]:,} GitHub stars' if r["stars"] is not None else "")
                 + f' · <a href="https://github.com/{xml_esc(r["repo"])}">View on GitHub</a></p>'
-                f'<h2 class="sect">Hacker News discussions</h2><ul>{items}</ul></div>')
+                + (f'<p><b>{xml_esc(ach[0])}</b> on Hacker News.</p>' if ach else "")
+                + (f'<h2 class="sect">From the README</h2><p class="readme-ex">{xml_esc(excerpt)}</p>' if excerpt else "")
+                + f'<h2 class="sect">Hacker News discussions</h2><ul>{items}</ul>'
+                + (f'<h2 class="sect">More from {xml_esc(r["owner"])} on Hacker News</h2><ul>'
+                   + "".join(f'<li><a href="/r/{xml_esc(x["repo"])}">{xml_esc(x["repo"])}</a> ({x["points"]:,} points): '
+                             f'{xml_esc(x["top_title"])}</li>' for x in more) + "</ul>" if more else "")
+                + "</div>")
         ld = {"@context": "https://schema.org", "@type": "SoftwareSourceCode", "name": r["name"],
               "codeRepository": f"https://github.com/{r['repo']}", "url": url, "description": r["descr"] or r["top_title"],
               "author": {"@type": "Person", "name": r["owner"]}, "programmingLanguage": r["lang"] or None,
@@ -513,9 +548,23 @@ def page_content(path):
     m = re.fullmatch(r"/u/([^/]+)/?", path)
     if m:
         name = m.group(1)
+        u = con.execute("SELECT karma FROM users WHERE name = ?", (name,)).fetchone()
+        posts = con.execute("""SELECT id, repo, title, points, comments, time FROM stories WHERE author = ?
+            ORDER BY points DESC LIMIT 60""", (name,)).fetchall()
+        if not posts:
+            return (404, f"{name} - HackerGit", "No GitHub repos posted to Hacker News by this user.",
+                    f"{SITE}/u/{name}", f'<div class="page"><h1>{xml_esc(name)}</h1><p>No GitHub repos posted yet.</p></div>', None)
+        n = con.execute("SELECT count(*), sum(points) FROM stories WHERE author = ?", (name,)).fetchone()
+        items = "".join(f'<li><a href="/r/{xml_esc(p["repo"])}">{xml_esc(p["repo"])}</a>: '
+                        f'<a href="https://news.ycombinator.com/item?id={p["id"]}">{xml_esc(p["title"])}</a> '
+                        f'({p["points"]:,} points, {p["comments"]:,} comments, {day(p["time"])})</li>' for p in posts)
+        body = (f'<div class="page"><h1>{xml_esc(name)}</h1><p>{n[0]:,} GitHub repo post{"s" if n[0] != 1 else ""} on Hacker '
+                f'News, {n[1] or 0:,} points in total' + (f', {u["karma"]:,} karma' if u else "") + '.</p>'
+                f'<h2 class="sect">GitHub repos posted by {xml_esc(name)}</h2><ul>{items}</ul></div>')
+        top = ", ".join(p["repo"] for p in posts[:3])
         return (200, f"GitHub repos posted to Hacker News by {name} - HackerGit",
-                f"Every GitHub repo {name} has shared on Hacker News, with points, comments and stars.",
-                f"{SITE}/u/{name}", f'<div class="page"><h1>{xml_esc(name)}</h1></div>', None)
+                f"{n[0]:,} GitHub repos {name} shared on Hacker News ({n[1] or 0:,} points), including {top}.",
+                f"{SITE}/u/{name}", body, None)
     return (404, "Page not found - HackerGit", "This page doesn't exist.", SITE + "/",
             '<div class="page"><h1>Page not found</h1><p><a href="/">Back to HackerGit</a></p></div>', None)
 
@@ -523,7 +572,7 @@ def page_content(path):
 _index_html = [None]
 
 
-def page_html(path):
+def page_html(path, query=""):
     """(status, html): the single-page app with real content, title, description and canonical for this page."""
     if _index_html[0] is None:
         with open(INDEX, encoding="utf-8") as fh:
@@ -547,7 +596,9 @@ def page_html(path):
                          (r'<meta property="og:image:alt" content="[^"]*">',
                           f'<meta property="og:image:alt" content="{t}">')):
             html = re.sub(pat, lambda _m, v=val: v, html, count=1)
-    head_extra = ('<meta name="robots" content="noindex">' if status == 404 else "")
+    # 404s aren't indexed; search/filter URLs (any query string) aren't either, but their links are followed
+    head_extra = ('<meta name="robots" content="noindex">' if status == 404 else
+                  '<meta name="robots" content="noindex, follow">' if query else "")
     if ld:
         head_extra += '<script type="application/ld+json">' + json.dumps(ld).replace("</", "<\\/") + "</script>"
     html = html.replace("</head>", head_extra + "\n</head>", 1)
@@ -1174,7 +1225,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(200, fh.read(), ctype, "no-cache" if fname == "sw.js" else "public, max-age=86400")
             if u.path == "/healthz":
                 return self.send(200, "ok", "text/plain")
-            status, html = page_html(u.path)
+            status, html = page_html(u.path, u.query)
             return self.send(status, html, "text/html; charset=utf-8", "public, max-age=300")
         except KeyError:
             return self.send(404, '{"error":"not found"}', "application/json")

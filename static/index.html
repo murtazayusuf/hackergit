@@ -213,6 +213,12 @@
     .pts-box b { font-size: 17px; }
     .postcard h3 { font-size: 15.5px; }
   }
+  .readme-ex { font-size: 14.5px; line-height: 1.65; color: var(--text); margin: 0 0 8px; max-width: 820px; }
+  .readme-ex a { color: var(--link); white-space: nowrap; }
+  .more-list { list-style: none; padding: 0; margin: 0 0 8px; }
+  .more-list li { padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .more-list a { color: var(--link); margin-right: 8px; }
+  .more-list .m { color: var(--muted); font-size: 13px; }
   .badgebox { margin: 18px 0 8px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg2); }
   .badgehead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
   .badgecode { display: flex; gap: 10px; align-items: center; }
@@ -661,7 +667,10 @@ async function renderRepo(key) {
     <div id="rk-grid">${rankingsGrid(d.rankings)}</div>
     <h2 class="sect">${r.subs === 1 ? "On Hacker News" : `On Hacker News, ${fmt(r.subs)} times`}</h2>
     <div id="posts">${postCards(d.posts)}</div>
+    ${d.readme ? `<h2 class="sect">From the README</h2><p class="readme-ex">${esc(d.readme)} <a href="https://github.com/${esc(r.repo)}#readme" target="_blank" rel="noopener">Read more on GitHub ↗</a></p>` : ""}
     <div id="trends"></div>
+    ${d.more && d.more.length ? `<h2 class="sect">More from ${esc(r.owner)} on Hacker News</h2>
+      <ul class="more-list">${d.more.map(x => `<li><a class="mono" href="/r/${esc(x.repo)}">${esc(x.repo)}</a> <span class="m">${fmt(x.points)} pts · ${esc(x.top_title)}</span></li>`).join("")}</ul>` : ""}
     <details class="badgedetails">
       <summary>Add a Hacker News badge to your README</summary>
       ${badgeBox(Object.assign(r, { _rankings: d.rankings, _posts: d.posts }), "Style")}
