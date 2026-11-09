@@ -533,6 +533,8 @@ def page_content(path):
                 + (f' · {r["stars"]:,} GitHub stars' if r["stars"] is not None else "")
                 + f' · <a href="https://github.com/{xml_esc(r["repo"])}">View on GitHub</a></p>'
                 + (f'<p><b>{xml_esc(ach[0])}</b> on Hacker News.</p>' if ach else "")
+                + f'<p><img src="{xml_esc(r["og_image"] or "https://opengraph.githubassets.com/1/" + r["repo"])}" '
+                  f'alt="Social preview of {xml_esc(r["repo"])}" width="640" height="320" loading="lazy"></p>'
                 + (f'<h2 class="sect">From the README</h2><p class="readme-ex">{xml_esc(excerpt)}</p>' if excerpt else "")
                 + f'<h2 class="sect">Hacker News discussions</h2><ul>{items}</ul>'
                 + (f'<h2 class="sect">More from {xml_esc(r["owner"])} on Hacker News</h2><ul>'
