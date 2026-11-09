@@ -468,7 +468,7 @@ def page_content(path):
         body = (f'<div class="page about"><h1>Hacker News badge for your GitHub README</h1>{BADGE_TEXT}'
                 '<p><img src="/badge/karpathy/nanoGPT.svg?style=card" alt="Hacker News badge example" width="250" height="55"></p>'
                 '<p><code>&lt;a href="https://hackergit.org/r/owner/repo"&gt;&lt;img src="https://hackergit.org/badge/owner/repo.svg?style=card" '
-                'alt="Hacker News" width="250" height="55"&gt;&lt;/a&gt;</code></p>'
+                'alt="Hacker News points via HackerGit" width="250" height="55"&gt;&lt;/a&gt;</code></p>'
                 '<p>Also works as Markdown, in dark mode, or linking straight to your HN post. Search for your repo above to get yours.</p></div>')
         return (200, "Hacker News badge for your GitHub README (Show HN badge) - HackerGit",
                 "Free Hacker News badge for your GitHub README: show your HN points, comments and posts. Card or "

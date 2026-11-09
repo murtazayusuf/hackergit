@@ -109,10 +109,10 @@ Point an `A` record for `hackergit.org` (and `www`) at the server's IP.
 Show how your repo did on Hacker News. Replace `owner/repo` with yours:
 
 ```html
-<a href="https://hackergit.org/r/owner/repo"><img src="https://hackergit.org/badge/owner/repo.svg?style=card" alt="Hacker News" width="250" height="55"></a>
+<a href="https://hackergit.org/r/owner/repo"><img src="https://hackergit.org/badge/owner/repo.svg?style=card" alt="Hacker News points via HackerGit" width="250" height="55"></a>
 ```
 
-<a href="https://hackergit.org/r/karpathy/nanoGPT"><img src="https://hackergit.org/badge/karpathy/nanoGPT.svg?style=card" alt="Hacker News" width="250" height="55"></a>
+<a href="https://hackergit.org/r/karpathy/nanoGPT"><img src="https://hackergit.org/badge/karpathy/nanoGPT.svg?style=card" alt="Hacker News points via HackerGit" width="250" height="55"></a>
 
 The card is 250×55, the same size as Trendshift-style README cards, and shows points, comments and number of HN posts.
 Add `&theme=dark` for dark READMEs.
@@ -121,11 +121,11 @@ Add `&theme=dark` for dark READMEs.
 "#1 Repo of the Day", "#3 Show HN of the Week", "#2 Repo of 2023" or a live front page position.
 Ranks compare GitHub posts on HN by points for the same day, week, month or year. Falls back to the points card.
 
-<a href="https://hackergit.org/r/karpathy/nanoGPT"><img src="https://hackergit.org/badge/karpathy/nanoGPT.svg?style=rank" alt="Hacker News" width="250" height="55"></a>
+<a href="https://hackergit.org/r/karpathy/nanoGPT"><img src="https://hackergit.org/badge/karpathy/nanoGPT.svg?style=rank" alt="Hacker News rank via HackerGit" width="250" height="55"></a>
 
 Prefer a small shields.io-style badge? Drop `?style=card`:
 
-[![Hacker News](https://hackergit.org/badge/karpathy/nanoGPT.svg)](https://hackergit.org/r/karpathy/nanoGPT)
+[![Hacker News points via HackerGit](https://hackergit.org/badge/karpathy/nanoGPT.svg)](https://hackergit.org/r/karpathy/nanoGPT)
 
 Options for the small badge: `?show=comments` or `?show=posts` for other numbers, `?label=HN` for a shorter label.
 

@@ -965,12 +965,13 @@ function wireBadgeBox(r) {
     const img = `https://hackergit.org/badge/${r.repo}.svg${q}`;
     const href = $("#badge-hn").checked ? `https://news.ycombinator.com/item?id=${chosen ? chosen.id : r.top_id}` : `https://hackergit.org/r/${r.repo}`;
     const size = style === "small" ? 'height="20"' : 'width="250" height="55"';
+    const alt = style.startsWith("rank") ? "Hacker News rank via HackerGit" : "Hacker News points via HackerGit";
     let code;
     if (format === "html") {
-      code = `<a href="${href}"><img src="${img}" alt="Hacker News" ${size}></a>`;
+      code = `<a href="${href}"><img src="${img}" alt="${alt}" ${size}></a>`;
       if ($("#badge-center").checked) code = `<p align="center">\n  ${code}\n</p>`;
     } else {
-      code = `[![Hacker News](${img})](${href})`;
+      code = `[![${alt}](${img})](${href})`;
     }
     $("#badge-center-wrap").hidden = format !== "html";
     $("#badge-md").textContent = code;
@@ -1132,7 +1133,7 @@ async function renderAbout() {
     </ul>
     <h2>Badge for your README</h2>
     <p>If your repo was on Hacker News, show it off. Open your repo's page here (search for it) and copy the badge, or use:</p>
-    <p><code>[![Hacker News](https://hackergit.org/badge/owner/repo.svg?style=card)](https://hackergit.org/r/owner/repo)</code></p>
+    <p><code>[![Hacker News points via HackerGit](https://hackergit.org/badge/owner/repo.svg?style=card)](https://hackergit.org/r/owner/repo)</code></p>
     <p><img src="/badge/karpathy/nanoGPT.svg?style=card" alt="Example Hacker News badge" width="250" height="55"></p>
     <p>It's 250×55, the same size as Trendshift-style cards. Prefer a small shields.io-style badge? Drop <code>?style=card</code>. More options on the <a href="/badges">badge page</a>.</p>
     <h2>Community</h2>
