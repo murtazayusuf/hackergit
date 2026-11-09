@@ -129,6 +129,11 @@ Prefer a small shields.io-style badge? Drop `?style=card`:
 
 Options for the small badge: `?show=comments` or `?show=posts` for other numbers, `?label=HN` for a shorter label.
 
+**Pick the post:** by default badges use the repo's best-scoring HN post. Add `post=latest` to follow the newest
+post (handy if the project has changed since its biggest post), or `post=<HN item id>` for a specific one.
+Works with every style, e.g. `?style=rank&post=latest` or `?style=card&post=40642871`. Repo pages show the
+rankings of each post too.
+
 Prefer to send readers straight to Hacker News? Point the link at your HN post instead
 (`https://news.ycombinator.com/item?id=...`); the badge picker on each repo page has a checkbox for this.
 It shows the best-scoring post and updates on its own. Every repo page on hackergit.org has a copy button.

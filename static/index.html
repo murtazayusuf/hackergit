@@ -237,8 +237,11 @@
   .badgefmt .badgelink { margin-top: 0; }
   .badgecode code { white-space: pre; }
   .badgelink[hidden] { display: none; }
-  #rank-pick-wrap { margin: 0 0 10px; }
-  #rank-pick { height: 30px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); padding: 0 6px; }
+  .pick-row { margin: 0 0 10px; }
+  .pick { height: 30px; max-width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); padding: 0 6px; }
+  .rk-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .rk-head .badgelink { margin: 0; color: var(--muted); }
+  .rk-head .pick { max-width: 320px; }
   .badgelink { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-top: 10px; cursor: pointer; }
   .badgehint code { font: 12px ui-monospace, monospace; }
   .about { max-width: 720px; font-size: 15px; line-height: 1.65; }
@@ -586,6 +589,21 @@ function rankPills(p) {
   return out.length ? `<div class="rks">${out.join("")}</div>` : "";
 }
 const PERIODS = [["day", "Day"], ["week", "Week"], ["month", "Month"], ["year", "Year"], ["alltime", "All time"]];
+// "best" (highest points), "latest" (follows new posts) or a specific HN post id.
+function postOptions(posts) {
+  if (!posts || posts.length < 2) return "";
+  const best = [...posts].sort((a, b) => b.points - a.points)[0];
+  const latest = [...posts].sort((a, b) => b.time - a.time)[0];
+  const byTime = [...posts].sort((a, b) => b.time - a.time);
+  return `<option value="best">Best post (${fmt(best.points)} pts, ${date(best.time)})</option>
+    <option value="latest">Latest post (${date(latest.time)}), follows new posts</option>
+    <optgroup label="A specific post">${byTime.map(p => `<option value="${p.id}">${date(p.time)} · ${fmt(p.points)} pts · ${esc(p.title.slice(0, 60))}</option>`).join("")}</optgroup>`;
+}
+function resolvePick(posts, v) {
+  if (v === "latest") return [...posts].sort((a, b) => b.time - a.time)[0];
+  if (v && v !== "best") return posts.find(p => String(p.id) === v);
+  return null;
+}
 function rankingsGrid(rankings) {
   if (!rankings || !rankings.length) return "";
   const rows = rankings.map(g => `<div class="rg-row"><div class="rg-name">${g.scope === "show" ? "Among Show HN posts" : "Among GitHub repos on HN"}</div>
@@ -638,17 +656,25 @@ async function renderRepo(key) {
       ${r.stars != null ? `<span><b>${fmt(r.stars)}</b> stars</span>` : ""}
       ${r.lang ? `<span><span class="dot" style="background:${LANG_COLORS[r.lang] || "#8b949e"}"></span>${esc(r.lang)}</span>` : ""}
     </div>
-    <h2 class="sect">Rankings (best post, by points)</h2>
-    ${rankingsGrid(d.rankings)}
+    <div class="rk-head"><h2 class="sect">Rankings by points</h2>
+      ${d.posts.length > 1 ? `<label class="badgelink">for <select id="rk-post" class="pick">${postOptions(d.posts)}</select></label>` : ""}</div>
+    <div id="rk-grid">${rankingsGrid(d.rankings)}</div>
     <h2 class="sect">${r.subs === 1 ? "On Hacker News" : `On Hacker News, ${fmt(r.subs)} times`}</h2>
     <div id="posts">${postCards(d.posts)}</div>
     <div id="trends"></div>
     <details class="badgedetails">
       <summary>Add a Hacker News badge to your README</summary>
-      ${badgeBox(Object.assign(r, { _rankings: d.rankings }), "Style")}
+      ${badgeBox(Object.assign(r, { _rankings: d.rankings, _posts: d.posts }), "Style")}
     </details>
   </div>`;
   renderTrends(r, d.posts);
+  const rkPost = $("#rk-post");
+  if (rkPost) rkPost.onchange = async () => {
+    const post = resolvePick(d.posts, rkPost.value);
+    if (!post) { $("#rk-grid").innerHTML = rankingsGrid(d.rankings); return; }
+    const pd = await api(`/api/post?id=${post.id}`).catch(() => null);
+    if (pd) $("#rk-grid").innerHTML = rankingsGrid(pd.scopes);
+  };
   const all = $("#all-posts");
   if (all) all.onclick = () => { $("#posts").innerHTML = postCards(d.posts, Infinity); };
   wireBadgeBox(r);
@@ -892,6 +918,10 @@ function achWhen(r) {
 }
 
 // Badge picker shared by repo pages and /badges: style + where the badge links to.
+function rankOptions(scopes) {
+  return `<option value="">Best (automatic)</option>` + scopes.map(g => PERIODS.map(([k, t]) =>
+    `<option value="${k}${g.scope === "show" ? "|show" : ""}">${g.scope === "show" ? "Show HN · " : ""}${k === "year" ? g.ranks.year.start.slice(0, 4) : t}: #${fmt(g.ranks[k].rank)}</option>`).join("")).join("");
+}
 function badgeBox(r, title) {
   return `<div class="badgebox" id="badgebox">
     <div class="badgehead"><b>${title}</b>
@@ -899,11 +929,10 @@ function badgeBox(r, title) {
         ${r.ach_rank != null ? `<button type="button" data-bs="rank" class="on">Rank</button><button type="button" data-bs="rank-dark">Rank (dark)</button>` : ""}<button type="button" data-bs="card"${r.ach_rank == null ? ' class="on"' : ""}>Card</button><button type="button" data-bs="card-dark">Card (dark)</button><button type="button" data-bs="small">Small</button>
       </div>
     </div>
-    ${r.ach_rank != null && r._rankings ? `<label class="badgelink" id="rank-pick-wrap">Ranking
-      <select id="rank-pick">
-        <option value="">Best (automatic)</option>
-        ${r._rankings.map(g => PERIODS.map(([k, t]) => `<option value="${k}${g.scope === "show" ? "|show" : ""}">${g.scope === "show" ? "Show HN · " : ""}${k === "year" ? g.ranks.year.start.slice(0, 4) : t}: #${fmt(g.ranks[k].rank)}</option>`).join("")).join("")}
-      </select></label>` : ""}
+    ${r._posts && r._posts.length > 1 ? `<label class="badgelink pick-row">Post
+      <select id="post-pick" class="pick">${postOptions(r._posts)}</select></label>` : ""}
+    ${r.ach_rank != null && r._rankings ? `<label class="badgelink pick-row" id="rank-pick-wrap">Ranking
+      <select id="rank-pick" class="pick">${rankOptions(r._rankings)}</select></label>` : ""}
     <div class="badgepreview" id="badge-preview"></div>
     <div class="badgefmt">
       <div class="seg" role="group" aria-label="Code format">
@@ -921,16 +950,20 @@ function wireBadgeBox(r) {
   if (!box) return;
   let style = r.ach_rank != null ? "rank" : "card", format = "html";
   const update = () => {
-    let q = { small: "", card: "?style=card", "card-dark": "?style=card&theme=dark",
+    let q = { small: "?", card: "?style=card", "card-dark": "?style=card&theme=dark",
               rank: "?style=rank", "rank-dark": "?style=rank&theme=dark" }[style];
+    const postPick = $("#post-pick");
+    const chosen = postPick && r._posts ? resolvePick(r._posts, postPick.value) : null;
+    if (postPick && postPick.value !== "best") q += `${q === "?" ? "" : "&"}post=${postPick.value}`;
     const pick = $("#rank-pick"), pickWrap = $("#rank-pick-wrap");
     if (pickWrap) pickWrap.hidden = !style.startsWith("rank");
     if (pick && pick.value && style.startsWith("rank")) {
       const [per, sc] = pick.value.split("|");
       q += `&rank=${per}${sc ? "&scope=show" : ""}`;
     }
+    if (q === "?") q = "";
     const img = `https://hackergit.org/badge/${r.repo}.svg${q}`;
-    const href = $("#badge-hn").checked ? `https://news.ycombinator.com/item?id=${r.top_id}` : `https://hackergit.org/r/${r.repo}`;
+    const href = $("#badge-hn").checked ? `https://news.ycombinator.com/item?id=${chosen ? chosen.id : r.top_id}` : `https://hackergit.org/r/${r.repo}`;
     const size = style === "small" ? 'height="20"' : 'width="250" height="55"';
     let code;
     if (format === "html") {
@@ -957,6 +990,14 @@ function wireBadgeBox(r) {
   $("#badge-hn").onchange = update;
   $("#badge-center").onchange = update;
   if ($("#rank-pick")) $("#rank-pick").onchange = update;
+  if ($("#post-pick")) $("#post-pick").onchange = async () => {
+    // the ranking choices follow the chosen post
+    const chosen = resolvePick(r._posts, $("#post-pick").value);
+    let scopes = r._rankings;
+    if (chosen) { const pd = await api(`/api/post?id=${chosen.id}`).catch(() => null); if (pd) scopes = pd.scopes; }
+    if ($("#rank-pick") && scopes) $("#rank-pick").innerHTML = rankOptions(scopes);
+    update();
+  };
   const cb = $("#copy-badge");
   cb.onclick = async () => {
     const text = $("#badge-md").textContent;
@@ -1003,7 +1044,7 @@ function renderBadges() {
         <div class="badgehint">This repo hasn't been posted on Hacker News yet (as a link to its GitHub page). Check the spelling, or try again after it's been posted.</div></div>`;
       return;
     }
-    d.repo._rankings = d.rankings;
+    d.repo._rankings = d.rankings; d.repo._posts = d.posts;
     out.innerHTML = badgeBox(d.repo, `<span class="mono">${esc(d.repo.repo)}</span> · <a href="/r/${esc(d.repo.repo)}">see its HN posts</a>`);
     wireBadgeBox(d.repo);
   };

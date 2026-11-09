@@ -679,6 +679,43 @@ def ranking_label(per, scope, info, pts, comments):
     return f"#{rank:,} {noun} of the {per.title()}", f"{when} · {pts:,} points"
 
 
+ACH_WEIGHT = {"day": 10, "week": 4, "month": 2, "year": 1}
+
+
+def resolve_post(con, r, which):
+    """A repo's post chosen by ?post=: 'latest', 'best' (or empty) or an HN item id. None if not found."""
+    if not r or not which or which == "best":
+        return None
+    if which == "latest":
+        return con.execute("SELECT id, time, points, comments, title FROM stories WHERE lower(repo) = ? "
+                           "ORDER BY time DESC LIMIT 1", (r["key"],)).fetchone()
+    if which.isdigit():
+        return con.execute("SELECT id, time, points, comments, title FROM stories WHERE id = ? AND lower(repo) = ?",
+                           (int(which), r["key"])).fetchone()
+    return None
+
+
+def post_detail(con, post):
+    """All rankings for one post, plus its single best achievement (same scoring as the repo-level one)."""
+    out = {"post_id": post["id"], "points": post["points"], "comments": post["comments"], "time": post["time"],
+           "title": post["title"], "scopes": [{"scope": "all", "ranks": post_rankings(con, post)}]}
+    if post["title"].lower().startswith("show hn"):
+        out["scopes"].append({"scope": "show", "ranks": post_rankings(con, post, "show")})
+    best = None
+    for g in out["scopes"]:
+        for per, w in ACH_WEIGHT.items():
+            info = g["ranks"][per]
+            if info["rank"] > 10 or post["points"] < 20:
+                continue
+            score = info["rank"] * w * (2 if g["scope"] == "show" else 1)
+            if best is None or score < best[0]:
+                best = (score, per, g["scope"], info)
+    if best:
+        big, small = ranking_label(best[1], best[2], best[3], post["points"], post["comments"])
+        out["best"] = {"period": best[1], "scope": best[2], "rank": best[3]["rank"], "label": big, "small": small}
+    return out
+
+
 def repo_rankings(con, r):
     """All rankings for a repo's top post, and for its best Show HN post if it has one."""
     out = []
@@ -751,10 +788,24 @@ def badge(path, query):
     key = f"{m.group(1)}/{m.group(2)}".lower()
     r = db().execute("SELECT * FROM repos WHERE key = ?", (key,)).fetchone()
     style = (p.get("style") or [""])[0]
+    chosen = resolve_post(db(), r, (p.get("post") or [""])[0])  # ?post=latest or ?post=<HN id>
+    plural = lambda n, w: f"{n:,} {w}{'s' if n != 1 else ''}"
     if style == "rank":
         theme = (p.get("theme") or ["light"])[0]
         per = (p.get("rank") or ["best"])[0]
         scope = "show" if (p.get("scope") or [""])[0] == "show" else "all"
+        if chosen:  # rankings of the chosen post
+            if per in RANK_PERIODS:
+                if scope == "show" and not chosen["title"].lower().startswith("show hn"):
+                    scope = "all"
+                info = post_rankings(db(), chosen, scope)[per]
+                big, small = ranking_label(per, scope, info, chosen["points"], chosen["comments"])
+                return badge_card(label, big, small, theme)
+            best = post_detail(db(), chosen).get("best")
+            if best:
+                return badge_card(label, best["label"], best["small"], theme)
+            return badge_card(label, plural(chosen["points"], "point"),
+                              f"{plural(chosen['comments'], 'comment')} \u00b7 {_nice_date(day(chosen['time']))}", theme)
         if r and per in RANK_PERIODS:  # a specific ranking, e.g. ?rank=week or ?rank=alltime&scope=show
             pid = r["show_id"] if scope == "show" else r["top_id"]
             post = db().execute("SELECT id, time, points, comments FROM stories WHERE id = ?", (pid,)).fetchone() if pid else None
@@ -771,10 +822,16 @@ def badge(path, query):
         theme = (p.get("theme") or ["light"])[0]
         if not r:
             return badge_card(label, "Not posted yet", "No posts found", theme, muted=True)
+        if chosen:
+            return badge_card(label, plural(chosen["points"], "point"),
+                              f"{plural(chosen['comments'], 'comment')} \u00b7 {_nice_date(day(chosen['time']))}", theme)
         return badge_card(label, plural(r["points"], "point"),
                           f"{plural(r['comments'], 'comment')} \u00b7 {plural(r['subs'], 'post')}", theme)
     if not r:
         return badge_svg(label, "not posted yet", "#9f9f9f")
+    if chosen and show != "posts":
+        n = chosen["comments"] if show == "comments" else chosen["points"]
+        return badge_svg(label, plural(n, "comment" if show == "comments" else "point"))
     if show == "comments":
         value = f"{r['comments']:,} comment{'s' if r['comments'] != 1 else ''}"
     elif show == "posts":
@@ -1019,6 +1076,12 @@ def api(path, p):
         return repo_detail((p.get("key") or [""])[0])
     if path == "/api/user":
         return user_detail((p.get("name") or [""])[0])
+    if path == "/api/post":
+        con = db()
+        pid = (p.get("id") or [""])[0]
+        post = con.execute("SELECT id, time, points, comments, title FROM stories WHERE id = ?",
+                           (int(pid),)).fetchone() if pid.isdigit() else None
+        return post_detail(con, post) if post else None
     if path == "/api/suggest":
         return suggest((p.get("q") or [""])[0])
     if path == "/api/series":
