@@ -124,8 +124,21 @@ jobs:
           if [ "$ATTACHED" != "$INSTANCE" ]; then
             aws lightsail attach-static-ip --static-ip-name "$STATIC_IP" --instance-name "$INSTANCE" >/dev/null
           fi
-          aws lightsail put-instance-public-ports --instance-name "$INSTANCE" --port-infos \
-            '[{"fromPort":22,"toPort":22,"protocol":"tcp"},{"fromPort":80,"toPort":80,"protocol":"tcp"},{"fromPort":443,"toPort":443,"protocol":"tcp"}]' >/dev/null
+          # Web ports accept only Cloudflare, so nobody can skip its cache by calling the server's IP.
+          # SSH stays open: GitHub's runners and the Lightsail browser console have changing IPs.
+          # If Cloudflare's IP list can't be fetched, keep the web ports open rather than lock the site out.
+          V4=$(curl -fsS --retry 3 https://www.cloudflare.com/ips-v4 | jq -R -s -c 'split("\n") | map(select(length > 0))' || true)
+          V6=$(curl -fsS --retry 3 https://www.cloudflare.com/ips-v6 | jq -R -s -c 'split("\n") | map(select(length > 0))' || true)
+          if [ "$(echo "${V4:-[]}" | jq length)" -ge 10 ] && [ "$(echo "${V6:-[]}" | jq length)" -ge 5 ]; then
+            WEB=$(jq -n -c --argjson v4 "$V4" --argjson v6 "$V6" \
+              '[80, 443] | map({fromPort: ., toPort: ., protocol: "tcp", cidrs: $v4, ipv6Cidrs: $v6})')
+            echo "Web ports limited to Cloudflare ($(echo "$V4" | jq length) IPv4 + $(echo "$V6" | jq length) IPv6 ranges)."
+          else
+            WEB='[{"fromPort":80,"toPort":80,"protocol":"tcp"},{"fromPort":443,"toPort":443,"protocol":"tcp"}]'
+            echo "::warning::Could not fetch Cloudflare IP ranges; web ports left open to everyone."
+          fi
+          PORTS=$(jq -n -c --argjson web "$WEB" '[{fromPort: 22, toPort: 22, protocol: "tcp"}] + $web')
+          aws lightsail put-instance-public-ports --instance-name "$INSTANCE" --port-infos "$PORTS" >/dev/null
           IP=$(aws lightsail get-static-ip --static-ip-name "$STATIC_IP" --query 'staticIp.ipAddress' --output text)
           echo "Server IP: $IP"
           echo "ip=$IP" >> "$GITHUB_OUTPUT"
@@ -190,12 +203,13 @@ jobs:
         env:
           IP: ${{ steps.ip.outputs.ip }}
         run: |
-          curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "http://$IP/healthz"
+          # Checked through Cloudflare (the server only accepts Cloudflare); the query string skips any cache.
+          curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "https://$DOMAIN/healthz?deploy=$GITHUB_RUN_ID"
           echo
           {
             echo "## HackerGit is deployed"
             echo ""
-            echo "- Server IP: \`$IP\` (open http://$IP to check it)"
+            echo "- Server IP: \`$IP\` (web ports only accept Cloudflare; SSH stays open)"
             echo "- DNS at your domain registrar: \`A\` record for \`$DOMAIN\` and \`www.$DOMAIN\` pointing to \`$IP\`"
             echo "- Then https://$DOMAIN works; HTTPS certificates are set up automatically."
             echo "- On the very first deploy, repos appear after ~5 minutes and karma after ~15."
