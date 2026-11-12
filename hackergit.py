@@ -664,7 +664,7 @@ def update(con, karma_limit=None):
     con.commit()
 
 
-def daemon(minutes=10, rank_minutes=2):
+def daemon(minutes=10, rank_minutes=1):
     """All background work, meant to run as its own low-priority process next to the web server."""
     import threading
 

@@ -335,11 +335,27 @@ def data_version(force=False):
     return _version["v"]
 
 
+_live = {"v": "0", "checked": 0.0}
+
+
+def live_version():
+    """Changes after every rank poll (each minute), when live points and front page positions are refreshed."""
+    now = time.time()
+    if now - _live["checked"] > 5:
+        _live["v"] = hg.meta_get(db(), "ranks_last_poll", "0")
+        _live["checked"] = now
+    return _live["v"]
+
+
+LIVE_APIS = ("/api/trending",)
+
+
 def cached_api(path, query):
-    """JSON body for an API call, from cache when the index hasn't changed since it was computed."""
+    """JSON body for an API call, from cache when the index hasn't changed since it was computed.
+    Trending also changes with every rank poll, so its cache follows that too."""
     p = parse_qs(query)
     key = path + "?" + urlencode(sorted((k, v[0]) for k, v in p.items()))
-    v = data_version()
+    v = data_version() + ("/" + live_version() if path in LIVE_APIS else "")
     with _cache_lock:
         hit = _cache.get(key)
         if hit and hit[0] == v:
@@ -1203,7 +1219,8 @@ class Handler(BaseHTTPRequestHandler):
                 if body is None:
                     return self.send(404, '{"error":"not found"}', "application/json")
                 return self.send(200, body, "application/json",
-                                 "no-cache" if u.path == "/api/stats" else "public, max-age=120")
+                                 "no-cache" if u.path == "/api/stats"
+                                 else "public, max-age=60" if u.path in LIVE_APIS else "public, max-age=120")
             if u.path == "/robots.txt":
                 return self.send(200, f"User-agent: *\nAllow: /\n\nSitemap: {SITE}/sitemap.xml\n", "text/plain")
             if u.path == "/sitemap.xml":
@@ -1280,7 +1297,7 @@ def main():
     port = int(os.environ.get("PORT", "8000"))
     minutes = float(os.environ.get("UPDATE_MINUTES", "10"))
     hg.connect().close()  # make sure the schema exists before readers open it
-    rank_minutes = float(os.environ.get("RANK_MINUTES", "2"))
+    rank_minutes = float(os.environ.get("RANK_MINUTES", "1"))
     if minutes > 0 or rank_minutes > 0:
         threading.Thread(target=background_process, args=(minutes, rank_minutes), daemon=True).start()
     threading.Thread(target=cache_warmer, daemon=True).start()

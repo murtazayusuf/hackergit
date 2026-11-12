@@ -395,7 +395,7 @@ const SAVED_KEY = "hg-cache-v1";
 let saved = (() => { try { return JSON.parse(localStorage.getItem(SAVED_KEY)) || { ver: null, items: {} }; } catch { return { ver: null, items: {} }; } })();
 let saveTimer = 0;
 function persist(path, data) {
-  if (!STATS || path.startsWith("/api/stats")) return;
+  if (!STATS || path.startsWith("/api/stats") || LIVE.test(path)) return;
   if (saved.ver !== STATS.version) saved = { ver: STATS.version, items: {} };
   saved.items[path] = data;
   const keys = Object.keys(saved.items);
@@ -406,8 +406,13 @@ function persist(path, data) {
     catch { saved.items = {}; try { localStorage.removeItem(SAVED_KEY); } catch {} }
   }, 300);
 }
+// Live data (trending: points, comments, front page positions) changes every minute, so it isn't kept in
+// localStorage and an in-page copy is reused for at most a minute.
+const LIVE = /^\/api\/trending/, LIVE_MS = 60 * 1000, liveAt = new Map();
 function api(path) {
-  if (!MEMO.has(path) && STATS && saved.ver === STATS.version && saved.items[path] !== undefined) {
+  if (LIVE.test(path) && MEMO.has(path) && Date.now() - (liveAt.get(path) || 0) > LIVE_MS) MEMO.delete(path);
+  if (LIVE.test(path) && !MEMO.has(path)) liveAt.set(path, Date.now());
+  if (!LIVE.test(path) && !MEMO.has(path) && STATS && saved.ver === STATS.version && saved.items[path] !== undefined) {
     MEMO.set(path, Promise.resolve(saved.items[path]));
   }
   if (!MEMO.has(path)) {
@@ -1224,7 +1229,7 @@ async function renderAbout() {
         not just by their HN title. Untick "Include READMEs" to search names and titles only.</li>
       <li>New posts are picked up every few minutes, and points and comment counts keep updating for a few days after a post.</li>
       <li><b>Rankings</b>: Hacker News doesn't keep a history of where posts ranked, so HackerGit records the front page and the
-        Show HN page every 2 minutes${st && st.ranks_since ? `, starting ${date(st.ranks_since)}` : ""}. Repo pages show each post's best
+        Show HN page every minute${st && st.ranks_since ? `, starting ${date(st.ranks_since)}` : ""}. Repo pages show each post's best
         position and how long it stayed on page one. Posts from before then show points and comments only.</li>
       <li>Links to a file or folder inside a repo count for that repo. The same repo posted several times shows up once under
         <i>Repos</i>, with every post listed; <i>HN posts</i> shows each post separately.</li>
@@ -1331,12 +1336,12 @@ async function drawFeaturedRail(el) {
   </div>`;
 }
 addEventListener("resize", () => { if ($(".layout").classList.contains("rails")) setRails(true); }, { passive: true });
-// Keep the panels current on a tab left open: trending (and so the featured pick) refreshes every 10 minutes.
+// Keep the panels current on an open tab: trending (and so the featured pick) refreshes every minute while visible.
 setInterval(() => {
-  MEMO.delete("/api/trending?period=day");
+  if (document.hidden || !$(".layout").classList.contains("rails")) return;
   railsDrawn = false;
-  if ($(".layout").classList.contains("rails")) setRails(true);
-}, 10 * 60 * 1000);
+  setRails(true);
+}, LIVE_MS);
 
 function route() {
   const p = decodeURIComponent(location.pathname);
