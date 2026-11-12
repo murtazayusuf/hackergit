@@ -398,7 +398,7 @@ def sitemap_urls(urls):
 
 def sitemap_file(name):
     if name == "pages.xml":
-        return sitemap_urls([(f"{SITE}/", day(time.time())), (f"{SITE}/trending", day(time.time())), (f"{SITE}/show-hn", day(time.time())), (f"{SITE}/badges", None), (f"{SITE}/about", None)])
+        return sitemap_urls([(f"{SITE}/", day(time.time())), (f"{SITE}/trending", day(time.time())), (f"{SITE}/show-hn", day(time.time())), (f"{SITE}/badges", None), (f"{SITE}/about", None), (f"{SITE}/advertise", None)])
     m = re.fullmatch(r"repos-(\d+)\.xml", name)
     if not m:
         return None
@@ -498,6 +498,14 @@ def page_content(path):
         return (200, "Hacker News badge for your GitHub README (Show HN badge) - HackerGit",
                 "Free Hacker News badge for your GitHub README: show your HN points, comments and posts. Card or "
                 "shields.io-style, HTML or Markdown, light or dark, updates automatically.", SITE + "/badges", body, None)
+    if path == "/advertise":
+        body = (f'<div class="page about"><h1>Feature your project on HackerGit</h1><p>HackerGit is where developers look up '
+                f'what Hacker News thought of a GitHub project ({repos_n} repos from {posts_n} HN posts). Get a featured card '
+                'on the home page, one project at a time. Email <a href="mailto:support@hackergit.org">support@hackergit.org</a> '
+                'with a link to your project and the dates you have in mind.</p></div>')
+        return (200, "Feature your project on HackerGit",
+                "Put your developer tool or open source project in front of developers browsing GitHub repos from Hacker "
+                "News. One featured spot on the HackerGit home page.", SITE + "/advertise", body, None)
     if path == "/about":
         body = (f'<div class="page about"><h1>About HackerGit</h1><p>HackerGit collects every GitHub repository shared on '
                 f'Hacker News ({repos_n} repos from {posts_n} posts) so you can search them and sort by points, comments, '

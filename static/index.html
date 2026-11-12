@@ -286,6 +286,18 @@
   .feat p { margin: 8px 0 10px; font-size: 13px; line-height: 1.45; color: var(--muted); }
   .feat-stats { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted); margin-bottom: 12px; }
   .feat-stats b { color: var(--text); font-weight: 600; }
+  .feat-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .feat-name.mono { font-size: 13.5px; }
+  .feat-tag { font-size: 11px; font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--accent); }
+  .feat-ask { display: block; margin-top: 10px; font-size: 12.5px; color: var(--muted); text-align: center; }
+  .feat-ask:hover { color: var(--link); }
+  .adv-card { border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; background: var(--bg2); margin: 18px 0; }
+  .adv-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 18px 0; }
+  .adv-stats div { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; background: var(--bg2); }
+  .adv-stats b { display: block; font-size: 22px; color: var(--text); }
+  .adv-stats span { font-size: 12.5px; color: var(--muted); }
+  .adv-btn { display: inline-block; padding: 9px 18px; border-radius: 8px; background: var(--accent); color: #fff !important; font-weight: 600; text-decoration: none; }
+  .adv-btn:hover { filter: brightness(1.08); }
   .feat-cta { display: flex; gap: 8px; }
   .feat-cta a { flex: 1; text-align: center; padding: 7px 10px; border-radius: 8px; font-size: 13px; font-weight: 600; border: 1px solid var(--line); background: var(--bg2); color: var(--text); white-space: nowrap; }
   .feat-cta a:hover { background: var(--bg3); }
@@ -359,6 +371,7 @@
   <a href="/show-hn">Show HN</a>
   <a href="https://discord.gg/V8pTuub3c4" rel="noopener">Discord</a>
   <a href="/badges">README badge</a>
+  <a href="/advertise">Get featured</a>
   <a href="https://github.com/murtazayusuf/hackergit" rel="noopener">GitHub</a>
 </footer>
 
@@ -1155,6 +1168,43 @@ function trendItem(r, n) {
     </div></div></li>`;
 }
 
+async function renderAdvertise() {
+  document.title = "Feature your project on HackerGit";
+  const st = await statsP;
+  const subject = encodeURIComponent("Featured project on HackerGit");
+  const body = encodeURIComponent("Hi,\n\nI'd like to feature my project on HackerGit.\n\nProject link:\nWhat it does (one or two lines):\nPreferred dates:\n\nThanks!");
+  const mail = `mailto:${CONTACT_EMAIL}?subject=${subject}&body=${body}`;
+  view.innerHTML = `<article class="about page">
+    <h1>Feature your project on HackerGit</h1>
+    <p>HackerGit is where developers look up what Hacker News thought of a GitHub project: its points, comments and rankings,
+      and what's trending on HN today. Put your project in front of them.</p>
+    <div class="adv-stats">
+      ${MONTHLY_VISITORS ? `<div><b>${esc(MONTHLY_VISITORS)}</b><span>visitors a month</span></div>` : ""}
+      ${st ? `<div><b>${short(st.repos)}</b><span>GitHub repos indexed</span></div>
+      <div><b>${short(st.stories)}</b><span>Hacker News posts tracked</span></div>` : ""}
+      <div><b>24/7</b><span>live HN front page and Show HN tracking</span></div>
+      <div><b>README</b><span>badges link back from GitHub repos</span></div>
+    </div>
+    <h2>What you get</h2>
+    <ul>
+      <li>A <b>featured card</b> on the HackerGit home page, beside the search results: your project's image, a short pitch,
+        and two buttons (your site and your GitHub repo).</li>
+      <li><b>One project at a time</b>, so you never share the spot.</li>
+      <li>Clearly labeled and linked as a sponsored placement, the way Google expects.</li>
+    </ul>
+    <h2>Who it's for</h2>
+    <p>Developer tools, open source projects, infrastructure and APIs: anything the Hacker News crowd would want to try.
+      We keep it relevant to the people using the site, so we may turn down projects that aren't a good fit.</p>
+    <div class="adv-card">
+      <h2 style="margin-top:0">Get in touch</h2>
+      <p>Email <a href="${mail}">${CONTACT_EMAIL}</a> with a link to your project and the dates you have in mind.
+        We'll reply with availability and pricing.</p>
+      <p style="margin-bottom:0"><a class="adv-btn" href="${mail}">Email ${CONTACT_EMAIL}</a></p>
+    </div>
+    <p>Until the spot is booked, it features a project trending on Hacker News today, picked automatically.</p>
+  </article>`;
+}
+
 async function renderAbout() {
   document.title = "About HackerGit: GitHub repos on Hacker News";
   const st = await statsP;
@@ -1193,6 +1243,9 @@ async function renderAbout() {
     <p>It's 250×55, the same size as Trendshift-style cards. Prefer a small shields.io-style badge? Drop <code>?style=card</code>. More options on the <a href="/badges">badge page</a>.</p>
     <h2>Community</h2>
     <p>Questions, ideas or feedback? Join the <a href="https://discord.gg/V8pTuub3c4">HackerGit Discord</a>.</p>
+    <h2>Get featured</h2>
+    <p>Want your project in the featured spot on the home page? See <a href="/advertise">how to get featured</a> or email
+      <a href="mailto:support@hackergit.org">support@hackergit.org</a>.</p>
     <h2>Support</h2>
     <p>HackerGit is free and runs on a small server. If you find it useful, you can <a href="https://github.com/sponsors/murtazayusuf">sponsor it on GitHub</a>.</p>
     <h2>Open source</h2>
@@ -1206,14 +1259,16 @@ async function renderAbout() {
 
 // ---------------------------------------------------------------- router
 // ---------------------------------------------------------------- side panels (home page)
-// The featured project in the right panel. To change it, edit this object (repo = owner/name on GitHub).
-const FEATURED = {
-  repo: "kividbio/kividb",
-  name: "KiviDB",
-  url: "https://kividb.io",
-  cta: "Try KiviDB",
-  pitch: "A fast, multi-threaded Redis and Valkey alternative written in Rust. Drop-in compatible, with full-text and vector search built in.",
-};
+// The right panel's featured project. While no one has booked the slot (SPONSOR = null), it shows a project from
+// today's trending list: of the top 3, the one with the fewest GitHub stars, so smaller projects get the spotlight.
+// To show a paid placement instead, set SPONSOR, for example:
+//   { repo: "kividbio/kividb", name: "KiviDB", url: "https://kividb.io", cta: "Try KiviDB",
+//     pitch: "A fast, multi-threaded Redis and Valkey alternative written in Rust..." }
+const SPONSOR = null;
+const CONTACT_EMAIL = "support@hackergit.org";
+// Real people per month, from Cloudflare Web Analytics (not the dashboard's "page views", which include bots).
+// Shown on /advertise when set, e.g. "25k".
+const MONTHLY_VISITORS = null;
 let railsDrawn = false;
 function setRails(on) {
   const layout = $(".layout"), l = $("#rail-l"), r = $("#rail-r");
@@ -1240,28 +1295,47 @@ async function drawTrendingRail(el) {
     }).join("")}</ol></div>`;
 }
 async function drawFeaturedRail(el) {
-  const f = FEATURED;
-  const d = await api(`/api/repo?key=${encodeURIComponent(f.repo)}`).catch(() => null);
-  const r = (d && d.repo) || {};
-  const out = (href, cls, text) => `<a class="${cls}" href="${esc(href)}" target="_blank" rel="sponsored noopener">${text}</a>`;
+  let f, r;
+  if (SPONSOR) {
+    f = SPONSOR;
+    const d = await api(`/api/repo?key=${encodeURIComponent(f.repo)}`).catch(() => null);
+    r = (d && d.repo) || {};
+  } else {
+    const d = await api("/api/trending?period=day").catch(() => null);
+    const top = (d && d.results || []).slice(0, 3);
+    if (!top.length) { el.innerHTML = ""; return; }
+    r = top.reduce((a, b) => ((b.stars ?? 0) < (a.stars ?? 0) ? b : a));
+    f = { repo: r.repo, name: r.repo, url: `/r/${r.repo}`, cta: "See it on HN", pitch: r.descr || r.top_title };
+  }
+  const link = (href, cls, text, extra = "") => /^https?:/.test(href)
+    ? `<a class="${cls}" href="${esc(href)}" target="_blank" rel="${SPONSOR ? "sponsored " : ""}noopener"${extra}>${text}</a>`
+    : `<a class="${cls}" href="${esc(href)}"${extra}>${text}</a>`;
+  const img = r.og_image || (r.repo ? ogUrl(r) : "");
   el.innerHTML = `<div class="rail-inner">
-    <div class="rail-h"><span>Featured</span></div>
+    <div class="rail-h"><span>Featured</span>${SPONSOR ? "" : `<span class="feat-tag">Trending today</span>`}</div>
     <div class="feat">
-      ${r.og_image ? `<a class="feat-img" href="${esc(f.url)}" target="_blank" rel="sponsored noopener" tabindex="-1" aria-hidden="true">
-        <img src="${esc(r.og_image)}" alt="" width="1280" height="640" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.parentElement.remove()"></a>` : ""}
+      ${img ? link(f.url, "feat-img", `<img src="${esc(img)}" alt="" width="1280" height="640" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.parentElement.remove()">`, ' tabindex="-1" aria-hidden="true"') : ""}
       <div class="feat-body">
-        <a class="feat-name" href="${esc(f.url)}" target="_blank" rel="sponsored noopener">${avatar(f.repo.split("/")[0], 24, r.avatar)}${esc(f.name)}</a>
-        <p>${esc(f.pitch)}</p>
+        ${link(f.url, "feat-name" + (SPONSOR ? "" : " mono"), `${avatar(f.repo.split("/")[0], 24, r.avatar)}<span>${esc(f.name)}</span>`)}
+        ${f.pitch ? `<p>${esc(f.pitch.length > 160 ? f.pitch.slice(0, 157) + "…" : f.pitch)}</p>` : ""}
         <div class="feat-stats">
-          ${r.stars != null ? `<span>★ <b>${short(r.stars)}</b> stars</span>` : ""}
+          ${r.stars != null ? `<span>★ <b>${short(r.stars)}</b> ${r.stars === 1 ? "star" : "stars"}</span>` : ""}
           ${r.lang ? `<span><span class="dot" style="background:${LANG_COLORS[r.lang] || "#8b949e"}"></span>${esc(r.lang)}</span>` : ""}
           ${r.points ? `<a href="/r/${esc(f.repo)}"><b>${fmt(r.points)}</b> HN points</a>` : ""}
         </div>
-        <div class="feat-cta">${out(f.url, "primary", esc(f.cta))}${out(`https://github.com/${f.repo}`, "", "GitHub ↗")}</div>
+        <div class="feat-cta">${link(f.url, "primary", esc(f.cta))}${link(`https://github.com/${f.repo}`, "", "GitHub ↗")}</div>
       </div>
-    </div></div>`;
+    </div>
+    <a class="feat-ask" href="/advertise">Feature your project here →</a>
+  </div>`;
 }
 addEventListener("resize", () => { if ($(".layout").classList.contains("rails")) setRails(true); }, { passive: true });
+// Keep the panels current on a tab left open: trending (and so the featured pick) refreshes every 10 minutes.
+setInterval(() => {
+  MEMO.delete("/api/trending?period=day");
+  railsDrawn = false;
+  if ($(".layout").classList.contains("rails")) setRails(true);
+}, 10 * 60 * 1000);
 
 function route() {
   const p = decodeURIComponent(location.pathname);
@@ -1273,6 +1347,7 @@ function route() {
   if (p === "/about") return renderAbout();
   if (p === "/badges") return renderBadges();
   if (p === "/trending") return renderTrending();
+  if (p === "/advertise") return renderAdvertise();
   setRails(true);
   return renderList();
 }
