@@ -257,6 +257,40 @@
   .about h2 { font-size: 18px; margin: 28px 0 6px; }
   .about a { color: var(--link); }
   .about code { font: 13px ui-monospace, monospace; background: var(--bg2); padding: 1px 5px; border-radius: 4px; }
+  /* Side panels on the home page: trending today (left) and featured project (right). Wide screens only. */
+  .layout { display: grid; grid-template-columns: minmax(0, 1040px); justify-content: center; }
+  .layout > main { margin: 0; min-width: 0; }
+  .rail { display: none; }
+  @media (min-width: 1280px) {
+    .layout.rails { grid-template-columns: 236px minmax(0, 1040px) 248px; gap: 8px; padding: 0 16px; }
+    .layout.rails .rail:not([hidden]) { display: block; }
+    .rail-inner { position: sticky; top: 76px; padding-top: 16px; }
+  }
+  .rail-h { display: flex; align-items: baseline; justify-content: space-between; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin: 0 0 8px; }
+  .rail-h a { font-size: 12px; font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--link); }
+  .tr-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .tr-list li + li { border-top: 1px solid var(--line); }
+  .tr-list a { display: grid; grid-template-columns: 18px 20px minmax(0, 1fr); gap: 8px; align-items: center; padding: 8px 10px; color: var(--text); }
+  .tr-list a:hover { background: var(--hover); }
+  .tr-n { color: var(--muted); font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
+  .tr-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+  .tr-m { display: block; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tr-m b { color: var(--accent); font-weight: 600; }
+  .tr-live { color: var(--accent); font-weight: 600; }
+  .feat { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--bg); }
+  .feat-img { display: block; aspect-ratio: 2 / 1; background: var(--bg3); }
+  .feat-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .feat-body { padding: 12px 14px 14px; }
+  .feat-name { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; color: var(--text); }
+  .feat-name .av { border-radius: 6px; }
+  .feat p { margin: 8px 0 10px; font-size: 13px; line-height: 1.45; color: var(--muted); }
+  .feat-stats { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+  .feat-stats b { color: var(--text); font-weight: 600; }
+  .feat-cta { display: flex; gap: 8px; }
+  .feat-cta a { flex: 1; text-align: center; padding: 7px 10px; border-radius: 8px; font-size: 13px; font-weight: 600; border: 1px solid var(--line); background: var(--bg2); color: var(--text); white-space: nowrap; }
+  .feat-cta a:hover { background: var(--bg3); }
+  .feat-cta a.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .feat-cta a.primary:hover { filter: brightness(1.08); }
   footer { max-width: 1040px; margin: 0 auto; padding: 24px 16px 48px; color: var(--muted); font-size: 12.5px; border-top: 1px solid var(--line); display: flex; gap: 16px; flex-wrap: wrap; }
   footer a { color: var(--link); }
 
@@ -312,7 +346,11 @@
 </header>
 
 <div id="bar"></div>
-<main id="view"></main>
+<div class="layout">
+  <aside class="rail rail-l" id="rail-l" aria-label="Trending today" hidden></aside>
+  <main id="view"></main>
+  <aside class="rail rail-r" id="rail-r" aria-label="Featured" hidden></aside>
+</div>
 
 <footer>
   <span>Data from <a href="https://news.ycombinator.com" rel="noopener">Hacker News</a> via the <a href="https://hn.algolia.com/api" rel="noopener">Algolia HN API</a> and the <a href="https://github.com/HackerNews/API" rel="noopener">official HN API</a>. Not affiliated with Y Combinator or GitHub.</span>
@@ -1167,15 +1205,75 @@ async function renderAbout() {
 }
 
 // ---------------------------------------------------------------- router
+// ---------------------------------------------------------------- side panels (home page)
+// The featured project in the right panel. To change it, edit this object (repo = owner/name on GitHub).
+const FEATURED = {
+  repo: "kividbio/kividb",
+  name: "KiviDB",
+  url: "https://kividb.io",
+  cta: "Try KiviDB",
+  pitch: "A fast, multi-threaded Redis and Valkey alternative written in Rust. Drop-in compatible, with full-text and vector search built in.",
+};
+let railsDrawn = false;
+function setRails(on) {
+  const layout = $(".layout"), l = $("#rail-l"), r = $("#rail-r");
+  layout.classList.toggle("rails", on);
+  l.hidden = r.hidden = !on;
+  if (!on || railsDrawn || !matchMedia("(min-width: 1280px)").matches) return;
+  railsDrawn = true;
+  drawTrendingRail(l);
+  drawFeaturedRail(r);
+}
+async function drawTrendingRail(el) {
+  const d = await api("/api/trending?period=day").catch(() => null);
+  const items = (d && d.results || []).slice(0, 10);
+  if (!items.length) { el.innerHTML = ""; return; }
+  el.innerHTML = `<div class="rail-inner">
+    <div class="rail-h"><span>Trending today</span><a href="/trending">See all</a></div>
+    <ol class="tr-list">${items.map((r, i) => {
+      const live = r.front_best ? `#${r.front_best} on front page` : r.show_best ? `#${r.show_best} on Show HN` : "";
+      return `<li><a href="/r/${esc(r.repo)}" title="${esc(r.top_title)}">
+        <span class="tr-n">${i + 1}</span>${avatar(r.owner, 20, r.avatar)}
+        <span><span class="tr-name mono">${esc(r.repo)}</span>
+        <span class="tr-m"><b>${fmt(r.points)}</b> pts · ${fmt(r.comments)} comments</span>
+        ${live ? `<span class="tr-m tr-live">${live}</span>` : ""}</span></a></li>`;
+    }).join("")}</ol></div>`;
+}
+async function drawFeaturedRail(el) {
+  const f = FEATURED;
+  const d = await api(`/api/repo?key=${encodeURIComponent(f.repo)}`).catch(() => null);
+  const r = (d && d.repo) || {};
+  const out = (href, cls, text) => `<a class="${cls}" href="${esc(href)}" target="_blank" rel="sponsored noopener">${text}</a>`;
+  el.innerHTML = `<div class="rail-inner">
+    <div class="rail-h"><span>Featured</span></div>
+    <div class="feat">
+      ${r.og_image ? `<a class="feat-img" href="${esc(f.url)}" target="_blank" rel="sponsored noopener" tabindex="-1" aria-hidden="true">
+        <img src="${esc(r.og_image)}" alt="" width="1280" height="640" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.parentElement.remove()"></a>` : ""}
+      <div class="feat-body">
+        <a class="feat-name" href="${esc(f.url)}" target="_blank" rel="sponsored noopener">${avatar(f.repo.split("/")[0], 24, r.avatar)}${esc(f.name)}</a>
+        <p>${esc(f.pitch)}</p>
+        <div class="feat-stats">
+          ${r.stars != null ? `<span>★ <b>${short(r.stars)}</b> stars</span>` : ""}
+          ${r.lang ? `<span><span class="dot" style="background:${LANG_COLORS[r.lang] || "#8b949e"}"></span>${esc(r.lang)}</span>` : ""}
+          ${r.points ? `<a href="/r/${esc(f.repo)}"><b>${fmt(r.points)}</b> HN points</a>` : ""}
+        </div>
+        <div class="feat-cta">${out(f.url, "primary", esc(f.cta))}${out(`https://github.com/${f.repo}`, "", "GitHub ↗")}</div>
+      </div>
+    </div></div>`;
+}
+addEventListener("resize", () => { if ($(".layout").classList.contains("rails")) setRails(true); }, { passive: true });
+
 function route() {
   const p = decodeURIComponent(location.pathname);
   window.scrollTo(0, 0);
+  setRails(false);
   let m;
   if ((m = p.match(/^\/r\/([^/]+\/[^/]+)\/?$/))) return renderRepo(m[1]);
   if ((m = p.match(/^\/u\/([^/]+)\/?$/))) return renderUser(m[1]);
   if (p === "/about") return renderAbout();
   if (p === "/badges") return renderBadges();
   if (p === "/trending") return renderTrending();
+  setRails(true);
   return renderList();
 }
 
