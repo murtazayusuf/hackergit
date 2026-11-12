@@ -406,9 +406,9 @@ function persist(path, data) {
     catch { saved.items = {}; try { localStorage.removeItem(SAVED_KEY); } catch {} }
   }, 300);
 }
-// Live data (trending: points, comments, front page positions) changes every minute, so it isn't kept in
+// Live data (trending and repo pages: points, comments, front page positions) changes every minute, so it isn't kept in
 // localStorage and an in-page copy is reused for at most a minute.
-const LIVE = /^\/api\/trending/, LIVE_MS = 60 * 1000, liveAt = new Map();
+const LIVE = /^\/api\/(trending|repo\?)/, LIVE_MS = 60 * 1000, liveAt = new Map();
 function api(path) {
   if (LIVE.test(path) && MEMO.has(path) && Date.now() - (liveAt.get(path) || 0) > LIVE_MS) MEMO.delete(path);
   if (LIVE.test(path) && !MEMO.has(path)) liveAt.set(path, Date.now());

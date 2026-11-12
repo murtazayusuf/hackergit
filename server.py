@@ -347,7 +347,7 @@ def live_version():
     return _live["v"]
 
 
-LIVE_APIS = ("/api/trending",)
+LIVE_APIS = ("/api/trending", "/api/repo")
 
 
 def cached_api(path, query):
@@ -372,9 +372,9 @@ def cached_api(path, query):
     return body
 
 
-def cached(key, build):
-    """Cache any computed text until the next index rebuild."""
-    v = data_version()
+def cached(key, build, live=False):
+    """Cache any computed text until the next index rebuild (live=True: also until the next rank poll)."""
+    v = data_version() + ("/" + live_version() if live else "")
     with _cache_lock:
         hit = _cache.get(key)
         if hit and hit[0] == v:
@@ -1232,10 +1232,11 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(404, "not found", "text/plain")
                 return self.send(200, body, "application/xml", "public, max-age=3600")
             if u.path.startswith("/badge/"):
-                body = cached("badge:" + u.path + "?" + u.query, lambda: badge(u.path, u.query) or "")
+                body = cached("badge:" + u.path + "?" + u.query, lambda: badge(u.path, u.query) or "", live=True)
                 if not body:
                     return self.send(404, "not found", "text/plain")
-                return self.send(200, body, "image/svg+xml; charset=utf-8", "public, max-age=300")
+                # GitHub's image proxy and browsers re-check on every view (max-age=0); Cloudflare keeps it a minute
+                return self.send(200, body, "image/svg+xml; charset=utf-8", "public, max-age=0, s-maxage=60, must-revalidate")
             m = re.fullmatch(r"/og/([A-Za-z0-9-]+/[A-Za-z0-9._-]+?)\.(svg|png)", u.path)
             if m:
                 if m.group(2) == "svg":

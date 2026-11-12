@@ -335,6 +335,19 @@ def track_ranks(con, interval_min):
                         [(x["id"], now, x.get("score") or 0, x.get("descendants") or 0) for x in items])
         con.executemany("UPDATE stories SET points = max(points, ?), comments = max(comments, ?) WHERE id = ?",
                         [(x.get("score") or 0, x.get("descendants") or 0, x["id"]) for x in items])
+        # carry the new numbers into those repos' summary rows now (badges, repo pages, trending), instead of
+        # waiting for the next full rebuild; rankings themselves still update with the rebuild
+        keys = sorted({r[0] for r in con.execute(
+            f"SELECT DISTINCT lower(repo) FROM stories WHERE id IN ({','.join('?' * len(items))})", [x["id"] for x in items])})
+        if keys:
+            con.execute(f"""UPDATE repos SET
+                  points = (SELECT max(points) FROM stories WHERE lower(repo) = repos.key),
+                  total_points = (SELECT sum(points) FROM stories WHERE lower(repo) = repos.key),
+                  comments = (SELECT sum(comments) FROM stories WHERE lower(repo) = repos.key),
+                  show_points = (SELECT points FROM stories WHERE id = repos.show_id),
+                  show_comments = (SELECT comments FROM stories WHERE id = repos.show_id),
+                  ach_points = coalesce((SELECT points FROM stories WHERE id = repos.ach_id), ach_points)
+                WHERE key IN ({','.join('?' * len(keys))})""", keys)
     meta_set(con, "ranks_last_poll", now)
     if not meta_get(con, "ranks_since"):
         meta_set(con, "ranks_since", now)
@@ -402,9 +415,9 @@ def refresh_github(con, limit=25000, stale_days=14):
     keys = [r[0] for r in con.execute("""
         SELECT r.key FROM repos r LEFT JOIN github g ON g.key=r.key
         WHERE g.key IS NULL OR ((g.avatar IS NULL OR g.og_custom IS NULL) AND g.missing = 0)
-           OR g.fetched < ? OR (r.last_time > ? AND g.fetched < ?)
+           OR g.fetched < ? OR (r.last_time > ? AND g.fetched < ?) OR (r.last_time > ? AND g.fetched < ?)
         ORDER BY g.fetched IS NOT NULL, (g.avatar IS NOT NULL AND g.og_custom IS NOT NULL), r.points DESC LIMIT ?""",
-        (now - stale_days * 86400, now - 30 * 86400, now - 86400, limit))]
+        (now - stale_days * 86400, now - 30 * 86400, now - 86400, now - 3 * 86400, now - 3600, limit))]
     done = 0
     for i in range(0, len(keys), 80):
         chunk = keys[i:i + 80]
