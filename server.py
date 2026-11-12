@@ -500,7 +500,7 @@ def page_content(path):
                 "shields.io-style, HTML or Markdown, light or dark, updates automatically.", SITE + "/badges", body, None)
     if path == "/advertise":
         body = (f'<div class="page about"><h1>Feature your project on HackerGit</h1><p>HackerGit is where developers look up '
-                f'what Hacker News thought of a GitHub project ({repos_n} repos from {posts_n} HN posts). Get a featured card '
+                f'what Hacker News thought of a GitHub project ({repos_n} repos from {posts_n} HN posts). About 30k page views a month. Get a featured card '
                 'on the home page, one project at a time. Email <a href="mailto:support@hackergit.org">support@hackergit.org</a> '
                 'with a link to your project and the dates you have in mind.</p></div>')
         return (200, "Feature your project on HackerGit",

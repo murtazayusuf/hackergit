@@ -1179,7 +1179,7 @@ async function renderAdvertise() {
     <p>HackerGit is where developers look up what Hacker News thought of a GitHub project: its points, comments and rankings,
       and what's trending on HN today. Put your project in front of them.</p>
     <div class="adv-stats">
-      ${MONTHLY_VISITORS ? `<div><b>${esc(MONTHLY_VISITORS)}</b><span>visitors a month</span></div>` : ""}
+      ${AUDIENCE ? `<div><b>${esc(AUDIENCE.value)}</b><span>${esc(AUDIENCE.label)}</span></div>` : ""}
       ${st ? `<div><b>${short(st.repos)}</b><span>GitHub repos indexed</span></div>
       <div><b>${short(st.stories)}</b><span>Hacker News posts tracked</span></div>` : ""}
       <div><b>24/7</b><span>live HN front page and Show HN tracking</span></div>
@@ -1266,9 +1266,10 @@ async function renderAbout() {
 //     pitch: "A fast, multi-threaded Redis and Valkey alternative written in Rust..." }
 const SPONSOR = null;
 const CONTACT_EMAIL = "support@hackergit.org";
-// Real people per month, from Cloudflare Web Analytics (not the dashboard's "page views", which include bots).
-// Shown on /advertise when set, e.g. "25k".
-const MONTHLY_VISITORS = null;
+// Audience size shown first on /advertise. Count people only: Cloudflare's dashboard "page views" include bots,
+// so use real browsers (Chrome, Safari, Firefox, Edge) or Cloudflare Web Analytics. null hides it.
+// About 1,200 human page views a day in Nov 2026.
+const AUDIENCE = { value: "30k", label: "page views a month from developers" };
 let railsDrawn = false;
 function setRails(on) {
   const layout = $(".layout"), l = $("#rail-l"), r = $("#rail-r");
