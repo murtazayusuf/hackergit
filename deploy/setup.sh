@@ -54,6 +54,13 @@ mv /etc/caddy/Caddyfile.new /etc/caddy/Caddyfile
 
 systemctl daemon-reload
 systemctl enable --quiet hackergit caddy
+# Fold the database's write-ahead log back into the database while nothing is reading it (it can grow to GBs).
+DB=/var/lib/hackergit/hackergit.db
+if [ -s "$DB-wal" ]; then
+  systemctl stop hackergit || true
+  echo "Checkpointing write-ahead log ($(du -h "$DB-wal" | cut -f1))..."
+  sudo -u hackergit python3 -c "import sqlite3; c = sqlite3.connect('$DB', timeout=600); print(c.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone())"
+fi
 systemctl restart hackergit
 systemctl reload caddy 2>/dev/null || systemctl restart caddy
 

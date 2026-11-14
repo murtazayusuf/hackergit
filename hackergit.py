@@ -155,6 +155,8 @@ def connect(readonly=False):
         con.execute("PRAGMA cache_size = -8000")       # ~8 MB page cache per connection
     else:
         con = sqlite3.connect(DB_PATH, timeout=60)
+        # after each checkpoint, shrink the write-ahead log back to at most 64 MB instead of keeping its peak size
+        con.execute("PRAGMA journal_size_limit = 67108864")
         cols = {r[1] for r in con.execute("PRAGMA table_info(repos)")}
         migrate = bool(cols) and "og_image" not in cols
         gcols = {r[1] for r in con.execute("PRAGMA table_info(github)")}
@@ -677,17 +679,32 @@ def update(con, karma_limit=None):
     con.commit()
 
 
+def checkpoint(con):
+    """Copy the write-ahead log into the database and empty it. Without this the log only grows while the site
+    is being read (it reached 9 GB once), and every read gets slower."""
+    try:
+        busy, frames, done = con.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        if busy:
+            con.execute("PRAGMA wal_checkpoint(PASSIVE)")
+    except Exception as e:
+        log("checkpoint failed:", e)
+
+
 def daemon(minutes=10, rank_minutes=1):
     """All background work, meant to run as its own low-priority process next to the web server."""
     import threading
 
     def ranks_loop():
         con = connect()
+        n = 0
         while True:
             try:
                 track_ranks(con, rank_minutes)
             except Exception as e:
                 log("ranks: error:", e)
+            n += 1
+            if n % 5 == 0:
+                checkpoint(con)
             time.sleep(rank_minutes * 60)
 
     if rank_minutes > 0:
@@ -705,6 +722,7 @@ def daemon(minutes=10, rank_minutes=1):
                 refresh_karma(con)
                 rebuild(con)
             update(con)
+            checkpoint(con)
             con.close()
         except Exception as e:
             log("daemon: update failed:", e)
