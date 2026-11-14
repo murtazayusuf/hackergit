@@ -1,0 +1,40 @@
+# Manual health check: CPU and burst-credit history from Lightsail, plus a snapshot of the server's load.
+name: Diagnose server
+on:
+  workflow_dispatch:
+permissions:
+  id-token: write
+  contents: read
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  INSTANCE: hackergit
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: CPU and burst credits (last 12 hours)
+        run: |
+          for m in CPUUtilization BurstCapacityPercentage; do
+            echo "== $m (5-minute averages)"
+            aws lightsail get-instance-metric-data --instance-name "$INSTANCE" --metric-name "$m" \
+              --period 300 --start-time "$(date -u -d '-12 hours' +%FT%TZ)" --end-time "$(date -u +%FT%TZ)" \
+              --unit Percent --statistics Average --output json \
+              | jq -r '.metricData | sort_by(.timestamp) | .[] | "\(.timestamp) \(.average | floor)"' | tail -150
+          done
+      - name: Server snapshot
+        run: |
+          set -euo pipefail
+          IP=$(aws lightsail get-instance --instance-name "$INSTANCE" --query 'instance.publicIpAddress' --output text)
+          mkdir -p ~/.ssh
+          K=$(aws lightsail download-default-key-pair --query privateKeyBase64 --output text)
+          if [[ "$K" == -----BEGIN* ]]; then printf '%s\n' "$K" > ~/.ssh/k; else printf '%s' "$K" | base64 -d > ~/.ssh/k; fi
+          chmod 600 ~/.ssh/k
+          ssh -i ~/.ssh/k -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 ubuntu@"$IP" '
+            uptime; echo; free -m; echo; top -bn1 -o %CPU | head -25; echo
+            ls -la /var/lib/hackergit/ 2>/dev/null; echo
+            sudo journalctl -u hackergit --since "-30 min" --no-pager | tail -60'
+          rm -f ~/.ssh/k
