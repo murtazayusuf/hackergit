@@ -466,7 +466,7 @@ def refresh_github(con, limit=25000, stale_days=14):
         log(f"github: refreshed {done} repos")
         meta_set(con, "github_status", f"ok: {done} repos refreshed at {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())}")
         con.commit()
-    return done
+    return keys[:done]
 
 
 # ---------------------------------------------------------------- READMEs
@@ -580,10 +580,25 @@ def refresh_readmes(con, limit=3000, stale_days=30):
 
 # ---------------------------------------------------------------- derived index
 
-def rebuild(con):
-    """Recompute per-repo aggregates and the repo search index in one transaction."""
+def rebuild(con, keys=None):
+    """Recompute per-repo aggregates and the repo search index in one transaction.
+    With `keys`, only those repos are recomputed (new posts, fresh points, new stars) and their rankings are kept
+    as they were: a few hundred rows instead of all 150k, so it can run every few minutes on a small server.
+    The full rebuild (rankings included) runs hourly."""
     t = time.time()
     con.execute("BEGIN IMMEDIATE")
+    con.execute("DROP TABLE IF EXISTS temp.only")
+    con.execute("CREATE TEMP TABLE only (k TEXT PRIMARY KEY)")
+    if keys is not None:
+        con.executemany("INSERT OR IGNORE INTO temp.only VALUES (?)", [(k.lower(),) for k in keys])
+        con.execute("DROP TABLE IF EXISTS temp.ach")
+        con.execute("""CREATE TEMP TABLE ach AS SELECT key AS k, ach_id AS id, ach_points AS points, ach_rank AS rk,
+                       ach_period AS per, ach_scope AS sc, ach_date AS dt FROM repos WHERE key IN (SELECT k FROM temp.only)""")
+        _fill_repos(con, partial=True)
+        meta_set(con, "last_rebuild", int(time.time()))
+        con.commit()
+        log(f"rebuild: {len(keys)} repos in {time.time() - t:.1f}s")
+        return
     # Each repo's best achievement: its rank among GitHub posts on HN (by points) for the day / week / month /
     # year of the post, or among Show HN posts, or its best live position on the front page / Show HN page.
     # Lower score = more impressive (a #2 of the year beats a #1 of the day).
@@ -622,8 +637,22 @@ def rebuild(con):
           SELECT *, row_number() OVER (PARTITION BY k ORDER BY score, rk, points DESC) AS rn FROM c
         ) WHERE rn = 1
     """)
-    con.execute("DELETE FROM repos")
-    con.execute("""
+    _fill_repos(con, partial=False)
+    meta_set(con, "last_rebuild", int(time.time()))
+    meta_set(con, "last_full_rebuild", int(time.time()))
+    con.commit()
+    log(f"rebuild: {con.execute('SELECT count(*) FROM repos').fetchone()[0]} repos in {time.time() - t:.1f}s")
+
+
+def _fill_repos(con, partial):
+    """(Re)write rows of `repos` and `repos_fts` from stories: all of them, or only the keys in temp.only."""
+    only = "WHERE lower(st.repo) IN (SELECT k FROM temp.only)" if partial else ""
+    if partial:
+        con.execute("DELETE FROM repos WHERE key IN (SELECT k FROM temp.only)")
+        con.execute("DELETE FROM repos_fts WHERE key IN (SELECT k FROM temp.only)")
+    else:
+        con.execute("DELETE FROM repos")
+    con.execute(f"""
         INSERT INTO repos(key, repo, owner, name, subs, points, total_points, comments, first_time, last_time,
                           top_id, top_title, top_author, karma, max_karma, stars, lang, descr,
                           kinds, show_id, show_title, show_points, show_comments, show_author, show_karma,
@@ -631,7 +660,7 @@ def rebuild(con):
         WITH s AS (
           SELECT st.*, lower(st.repo) AS k, coalesce(u.karma, 0) AS karma,
                  row_number() OVER (PARTITION BY lower(st.repo) ORDER BY st.points DESC, st.time) AS rn
-          FROM stories st LEFT JOIN users u ON u.name = st.author
+          FROM stories st LEFT JOIN users u ON u.name = st.author {only}
         ), agg AS (
           SELECT k, count(*) subs, max(points) points, sum(points) total_points, sum(comments) comments,
                  min(time) first_time, max(time) last_time, max(karma) max_karma,
@@ -655,25 +684,29 @@ def rebuild(con):
         LEFT JOIN temp.ach ac ON ac.k = a.k
         LEFT JOIN github g ON g.key = a.k
     """)
-    con.execute("DELETE FROM repos_fts")
-    con.execute("""
+    if not partial:
+        con.execute("DELETE FROM repos_fts")
+    con.execute(f"""
         INSERT INTO repos_fts(key, repo, titles, descr)
         SELECT r.key, replace(r.repo, '/', ' ') || ' ' || r.repo, t.titles, coalesce(r.descr, '')
-        FROM repos r JOIN (SELECT lower(repo) AS k, group_concat(title, ' | ') AS titles
-                           FROM stories GROUP BY lower(repo)) t ON t.k = r.key
+        FROM repos r JOIN (SELECT lower(st.repo) AS k, group_concat(st.title, ' | ') AS titles
+                           FROM stories st {only} GROUP BY lower(st.repo)) t ON t.k = r.key
     """)
-    meta_set(con, "last_rebuild", int(time.time()))
-    con.commit()
-    log(f"rebuild: {con.execute('SELECT count(*) FROM repos').fetchone()[0]} repos in {time.time() - t:.1f}s")
 
 
 def update(con, karma_limit=None):
     n = update_recent(con)
     log(f"update: {n} recent repo-stories fetched")
     refresh_karma(con, limit=karma_limit)
-    rebuild(con)
-    if refresh_github(con):
+    gh = refresh_github(con) or []
+    # Full rebuild (all repos, rankings) once an hour; in between, only the repos that can have changed:
+    # posted in the last 3 days, or with fresh GitHub data.
+    if int(meta_get(con, "last_full_rebuild", 0) or 0) < time.time() - 3600:
         rebuild(con)
+    else:
+        recent = [r[0] for r in con.execute(
+            "SELECT DISTINCT lower(repo) FROM stories WHERE time > ?", (int(time.time()) - 3 * 86400,))]
+        rebuild(con, keys=sorted(set(recent) | {k.lower() for k in gh}))
     refresh_readmes(con)  # incremental index: no rebuild needed
     meta_set(con, "last_update", int(time.time()))
     con.commit()
