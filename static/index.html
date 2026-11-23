@@ -486,7 +486,7 @@ const OPT = {
 };
 
 function select(name, opts, value, label) {
-  return `<label>${label}<select data-f="${name}">${opts.map(([v, t]) => `<option value="${v}"${v === value ? " selected" : ""}>${t}</option>`).join("")}</select></label>`;
+  return `<label>${label}<select data-f="${name}">${opts.map(([v, t]) => `<option value="${esc(v)}"${v === value ? " selected" : ""}>${esc(t)}</option>`).join("")}</select></label>`;
 }
 
 let navToken = 0;
@@ -510,7 +510,9 @@ async function renderList() {
   $("#q").value = s.q;
   const years = [], now = new Date().getUTCFullYear();
   for (let y = now; y >= 2007; y--) years.push([String(y), String(y)]);
-  const karmaVal = (s.min_karma || s.max_karma) ? `${s.min_karma || 0}-${s.max_karma || ""}`.replace(/^0-$/, "") : "";
+  const digits = (x) => /^\d+$/.test(x || "") ? x : "";
+  const minK = digits(s.min_karma), maxK = digits(s.max_karma);
+  const karmaVal = (minK || maxK) ? `${minK || 0}-${maxK || ""}`.replace(/^0-$/, "") : "";
   const karmaOpts = OPT.karma.some(o => o[0] === karmaVal) ? OPT.karma : [...OPT.karma, [karmaVal, karmaVal]];
   const hasStars = STATS && STATS.with_stars > 0;
   const langs = (STATS && STATS.langs) || [];
